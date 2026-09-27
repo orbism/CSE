@@ -1,0 +1,19 @@
+node_modules/
+dist/
+out/
+.next/
+.env
+.env.local
+*.log
+
+# foundry
+packages/contracts/cache/
+packages/contracts/out/
+packages/contracts/broadcast/
+packages/contracts/lib/
+
+# build artefacts
+*.tsbuildinfo
+
+# local deploy rehearsals are throwaway; real network records are committed
+deployments/localhost.json

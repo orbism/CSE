@@ -1,0 +1,654 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  BASES,
+  DEFAULT_GENOME,
+  LabEngine,
+  MAX_OPS,
+  OPS,
+  OP_RANGES,
+  breed,
+  decodeGenome,
+  encodeGenome,
+  genomeKey,
+  randomGenome,
+  type BaseName,
+  type Genome,
+  type OpName,
+} from "@cse/art";
+import { PALETTES } from "@cse/core";
+import Link from "next/link";
+import { LabExportBar } from "./LabExportBar";
+import { DESK_QUERY, LabWindow, useDesk } from "./LabDesk";
+import { AudioMeter } from "./AudioMeter";
+import { AudioDrive, DEFAULT_TUNING, type AudioSource, type AudioTuning } from "../lib/audio";
+
+const MAX_PIXELS = 1400;
+
+/** Advanced sound controls, grouped; each group can detach into its own window. */
+const SOUND_SECTIONS: {
+  id: string;
+  title: string;
+  knobs: [keyof AudioTuning, number, number, string?][];
+}[] = [
+  {
+    id: "pulse",
+    title: "Pulse",
+    knobs: [
+      ["pump", 0, 2],
+      ["snap", 0.3, 2, "pulse length — lower is tighter"],
+      ["squash", 0, 2],
+      ["breathe", 0, 2, "swell with the bass level"],
+    ],
+  },
+  {
+    id: "motion",
+    title: "Motion",
+    knobs: [
+      ["spin", 0, 2],
+      ["whip", 0, 2, "spin kick per beat"],
+      ["wobble", 0, 2, "roll on hi-hats"],
+    ],
+  },
+  {
+    id: "surface",
+    title: "Surface",
+    knobs: [
+      ["feedback", 0, 2],
+      ["glitch", 0, 2],
+      ["flash", 0, 1, "strobe — photosensitivity warning"],
+    ],
+  },
+];
+
+/**
+ * The Lab.
+ *
+ * Not a preset browser. A form here is the operator chain that made it, so the
+ * chain is what the controls edit, what the URL carries, and what breeding
+ * recombines. Nothing here can be minted — the collection is fixed at 512 and
+ * was uniqueness-checked before the mint opened.
+ */
+export function Lab() {
+  const [genome, setGenome] = useState<Genome>(DEFAULT_GENOME);
+  const [engine, setEngine] = useState<LabEngine | null>(null);
+  const [spinning, setSpinning] = useState(true);
+  const [tray, setTray] = useState<Genome[]>([]);
+  const [temperature, setTemperature] = useState(0);
+  const [copied, setCopied] = useState(false);
+  const [triangles, setTriangles] = useState(0);
+  const [audio, setAudio] = useState<{ source: AudioSource; drive: AudioDrive } | null>(null);
+  const [audioError, setAudioError] = useState("");
+  const [tuning, setTuning] = useState<AudioTuning>(DEFAULT_TUNING);
+  const [advanced, setAdvanced] = useState(false);
+  const [full, setFull] = useState(false);
+  const [detached, setDetached] = useState<string[]>([]);
+
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const engineRef = useRef<LabEngine | null>(null);
+  const seenRef = useRef<Set<string>>(new Set());
+  const dragRef = useRef<{ x: number; y: number } | null>(null);
+  const audioRef = useRef<AudioDrive | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const deskRef = useRef<HTMLDivElement>(null);
+  const dockRef = useRef<HTMLDivElement>(null);
+  const desk = useDesk(deskRef, dockRef, full);
+
+  // ---- engine lifecycle. One WebGL context, created once.
+  useEffect(() => {
+    let disposed = false;
+    const canvas = canvasRef.current;
+    const wrap = wrapRef.current;
+    if (!canvas || !wrap) return;
+
+    const measure = () =>
+      Math.max(
+        200,
+        Math.min(MAX_PIXELS, Math.round(wrap.clientWidth * Math.min(2, window.devicePixelRatio || 1))),
+      );
+
+    LabEngine.create({ canvas, size: measure(), fontUrl: "/fonts/JetBrainsMono-Regular.woff2" })
+      .then((e) => {
+        if (disposed) {
+          e.dispose();
+          return;
+        }
+        engineRef.current = e;
+        setEngine(e);
+      })
+      .catch((err) => console.error("lab engine failed to start", err));
+
+    const observer = new ResizeObserver(() => engineRef.current?.resize(measure()));
+    observer.observe(wrap);
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      engineRef.current?.dispose();
+      engineRef.current = null;
+    };
+  }, []);
+
+  // ---- music drives the form live, on top of the genome
+  const stopAudio = useCallback(() => {
+    engineRef.current?.setDrive(null);
+    audioRef.current?.close();
+    audioRef.current = null;
+    setAudio(null);
+  }, []);
+
+  const startAudio = async (source: AudioSource) => {
+    stopAudio();
+    setAudioError("");
+    try {
+      const drive = await AudioDrive.open(source, stopAudio);
+      drive.tuning = tuning;
+      audioRef.current = drive;
+      engineRef.current?.setDrive(drive.read);
+      setAudio({ source, drive });
+      setSpinning(true);
+    } catch (err) {
+      setAudioError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  useEffect(() => {
+    if (audioRef.current) audioRef.current.tuning = tuning;
+  }, [tuning]);
+
+  const tune = (key: keyof AudioTuning, min: number, max: number, label: string = key, hint?: string) => (
+    <Slider
+      key={key}
+      label={`${label} ${tuning[key].toFixed(2)}`}
+      min={min}
+      max={max}
+      step={0.01}
+      value={tuning[key]}
+      onChange={(v) => setTuning((t) => ({ ...t, [key]: v }))}
+      hint={hint}
+    />
+  );
+
+  useEffect(() => stopAudio, [stopAudio]);
+
+  // ---- full screen: the desk takes the viewport. The Fullscreen API where the
+  // browser has it (desktop, iPad), a fixed overlay either way.
+  const exitFull = useCallback(() => {
+    setFull(false);
+    const d = document as Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => void };
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if (d.webkitFullscreenElement) d.webkitExitFullscreen?.();
+  }, []);
+
+  const enterFull = () => {
+    setFull(true);
+    const el = rootRef.current as (HTMLElement & { webkitRequestFullscreen?: () => void }) | null;
+    if (el?.requestFullscreen) el.requestFullscreen().catch(() => {});
+    else el?.webkitRequestFullscreen?.();
+  };
+
+  useEffect(() => {
+    if (!full) return;
+    const d = document as Document & { webkitFullscreenElement?: Element };
+    let entered = false;
+    const onChange = () => {
+      const now = !!(document.fullscreenElement ?? d.webkitFullscreenElement);
+      if (now) entered = true;
+      else if (entered) setFull(false); // left via Esc or the browser's own control
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && exitFull();
+    // Full screen only exists on the desk; shrinking below it leaves.
+    const mq = window.matchMedia(DESK_QUERY);
+    const onMq = () => !mq.matches && exitFull();
+    mq.addEventListener("change", onMq);
+    document.addEventListener("fullscreenchange", onChange);
+    document.addEventListener("webkitfullscreenchange", onChange);
+    document.addEventListener("keydown", onKey);
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("fullscreenchange", onChange);
+      document.removeEventListener("webkitfullscreenchange", onChange);
+      document.removeEventListener("keydown", onKey);
+      mq.removeEventListener("change", onMq);
+      document.body.style.overflow = "";
+    };
+  }, [full, exitFull]);
+
+  // ---- rebuild whenever the genome changes
+  useEffect(() => {
+    const e = engineRef.current;
+    if (!e) return;
+    e.load(genome);
+    setTriangles(e.triangles);
+    if (spinning) e.start();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [genome, engine]);
+
+  useEffect(() => {
+    const e = engineRef.current;
+    if (!e) return;
+    if (spinning) e.start();
+    else e.stop();
+  }, [spinning]);
+
+  // ---- a genotype in the URL is the share mechanism
+  useEffect(() => {
+    const hash = window.location.hash.replace(/^#g=/, "");
+    if (!hash) return;
+    const g = decodeGenome(decodeURIComponent(hash));
+    if (g) setGenome(g);
+  }, []);
+
+  const apply = useCallback((g: Genome) => {
+    seenRef.current.add(genomeKey(g));
+    setGenome(g);
+    window.history.replaceState(null, "", `#g=${encodeURIComponent(encodeGenome(g))}`);
+  }, []);
+
+  /**
+   * Escalating, not merely random. Each consecutive press raises the
+   * temperature — longer chains, wilder operators, parameters pushed to their
+   * limits — so holding it down travels somewhere rather than resampling the
+   * same neighbourhood. Anything already served this session is rerolled.
+   */
+  const getWeird = useCallback(() => {
+    const t = Math.min(1, temperature + 0.18);
+    setTemperature(t);
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const g = randomGenome(`${Date.now()}-${attempt}-${Math.random()}`, t);
+      if (!seenRef.current.has(genomeKey(g))) {
+        apply(g);
+        return;
+      }
+    }
+    apply(randomGenome(`${Date.now()}-fallback`, t));
+  }, [temperature, apply]);
+
+  const patch = (fn: (g: Genome) => Genome) => apply(fn(structuredClone(genome)));
+
+  return (
+    <div ref={rootRef} className={`lab${full ? " lab-full" : ""}`}>
+      <div className="lab-bar">
+        {full && (
+          <Link href="/" className="wordmark lab-bar-mark" onClick={exitFull}>
+            Cubic
+            <br />
+            Symmetry
+            <br />
+            Engine
+          </Link>
+        )}
+        <span className="mono-label">Lab · drag headers to rearrange</span>
+        <div className="lab-bar-tools">
+          <button onClick={desk.tidy} title="Open every module and re-pack the layout">
+            tidy
+          </button>
+          <button className={full ? "on" : ""} onClick={full ? exitFull : enterFull}>
+            {full ? "exit full screen" : "full screen"}
+          </button>
+        </div>
+      </div>
+
+      <div ref={deskRef} className="lab-desk">
+        {/* Docked, never floating: the form and its genotype stay top left. */}
+        <div ref={dockRef} className="lab-dock">
+          <div
+            ref={wrapRef}
+            className="lab-canvas"
+            onPointerDown={(e) => {
+              dragRef.current = { x: e.clientX, y: e.clientY };
+              (e.target as HTMLElement).setPointerCapture(e.pointerId);
+            }}
+            onPointerMove={(e) => {
+              const d = dragRef.current;
+              if (!d) return;
+              engineRef.current?.rotateBy((e.clientX - d.x) * 0.01, (e.clientY - d.y) * 0.01);
+              dragRef.current = { x: e.clientX, y: e.clientY };
+            }}
+            onPointerUp={() => (dragRef.current = null)}
+            onPointerCancel={() => (dragRef.current = null)}
+          >
+            <canvas ref={canvasRef} />
+          </div>
+
+          <div className="tooling">
+            <div className="tooling-buttons">
+              <button className={spinning ? "" : "on"} onClick={() => setSpinning((s) => !s)}>
+                {spinning ? "Pause" : "Play"}
+              </button>
+              <button
+                className="primary"
+                onClick={getWeird}
+                title="Each press goes further out than the last"
+              >
+                Get weird ⚡
+              </button>
+              <button
+                onClick={() => {
+                  setTray((t) => [genome, ...t].slice(0, 4));
+                }}
+                title="Keep this one to breed with"
+              >
+                Keep
+              </button>
+              <button
+                disabled={tray.length < 1}
+                onClick={() => apply(breed(genome, tray[0], `${Date.now()}`))}
+                title="Splice this chain with the last one you kept"
+              >
+                Breed
+              </button>
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(window.location.href);
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 1800);
+                }}
+              >
+                {copied ? "Copied ✓" : "Copy link"}
+              </button>
+            </div>
+            <span className="tooling-hint">
+              drag to turn · {triangles.toLocaleString()} triangles · heat{" "}
+              {(temperature * 100) | 0}%
+            </span>
+          </div>
+
+          <div className="lab-dock-genotype">
+            <div className="mono-label">Genotype</div>
+            <textarea
+              className="lab-genotype"
+              spellCheck={false}
+              value={encodeGenome(genome)}
+              onChange={(e) => {
+                const g = decodeGenome(e.target.value.trim());
+                if (g) apply(g);
+              }}
+            />
+          </div>
+        </div>
+
+        <LabWindow id="sound" title="Sound" desk={desk}>
+          <div className="lab-chips">
+            <button className={audio ? "" : "on"} onClick={stopAudio}>
+              off
+            </button>
+            <button
+              className={audio?.source === "share" ? "on" : ""}
+              onClick={() => startAudio("share")}
+              title="Share a tab (or the whole screen) and tick “Share audio”"
+            >
+              tab / system
+            </button>
+            <button
+              className={audio?.source === "input" ? "on" : ""}
+              onClick={() => startAudio("input")}
+              title="Mic, or a loopback device like BlackHole carrying system audio"
+            >
+              mic / line-in
+            </button>
+            <button
+              className={advanced ? "on" : ""}
+              onClick={() => setAdvanced((a) => !a)}
+              title="Per-effect controls"
+            >
+              advanced
+            </button>
+          </div>
+          <AudioMeter drive={audio?.drive ?? null} advanced={advanced} />
+          {tune(
+            "sensitivity",
+            0,
+            2,
+            "sensitivity",
+            audioError || "kick → pump · mids → feedback · highs → spin · hats → wobble + glitch",
+          )}
+          {advanced && (
+            <>
+              {SOUND_SECTIONS.filter((sec) => !detached.includes(sec.id)).map((sec) => (
+                <div className="lab-sub" key={sec.id}>
+                  <div className="lab-sub-head">
+                    <span className="mono-label">{sec.title}</span>
+                    <button
+                      className="desk-only"
+                      title="Detach into its own window"
+                      onClick={() => setDetached((d) => [...d, sec.id])}
+                    >
+                      ⇱
+                    </button>
+                  </div>
+                  <div className="lab-audio-advanced">
+                    {sec.knobs.map(([k, lo, hi, hint]) => tune(k, lo, hi, k, hint))}
+                  </div>
+                </div>
+              ))}
+              <button className="lab-sub-reset" onClick={() => setTuning(DEFAULT_TUNING)}>
+                reset sound
+              </button>
+            </>
+          )}
+        </LabWindow>
+
+        {SOUND_SECTIONS.filter((sec) => detached.includes(sec.id)).map((sec) => (
+          <LabWindow
+            key={sec.id}
+            id={`sound-${sec.id}`}
+            title={`Sound · ${sec.title}`}
+            desk={desk}
+            actions={
+              <button
+                title="Dock back into Sound"
+                onClick={() => setDetached((d) => d.filter((x) => x !== sec.id))}
+              >
+                ⇲
+              </button>
+            }
+          >
+            {sec.knobs.map(([k, lo, hi, hint]) => tune(k, lo, hi, k, hint))}
+          </LabWindow>
+        ))}
+
+        <LabWindow id="presets" title="Base · palette" desk={desk}>
+          <div className="mono-label">Base</div>
+          <div className="lab-chips">
+            {BASES.map((b) => (
+              <button
+                key={b}
+                className={genome.base === b ? "on" : ""}
+                onClick={() => patch((g) => ({ ...g, base: b as BaseName }))}
+              >
+                {b}
+              </button>
+            ))}
+          </div>
+          <div className="mono-label" style={{ marginTop: 12 }}>
+            Palette
+          </div>
+          <div className="lab-chips">
+            {PALETTES.map((p) => (
+              <button
+                key={p.name}
+                className={genome.render.palette === p.name ? "on" : ""}
+                onClick={() => patch((g) => ({ ...g, render: { ...g.render, palette: p.name } }))}
+              >
+                {p.name}
+              </button>
+            ))}
+          </div>
+        </LabWindow>
+
+        <LabWindow id="field" title="Field" desk={desk}>
+          <Slider
+            label={`degree ${genome.field.degree}`}
+            min={3}
+            max={5}
+            step={1}
+            value={genome.field.degree}
+            onChange={(v) => patch((g) => ({ ...g, field: { ...g.field, degree: v as 3 | 4 | 5 } }))}
+            hint="4 and 5 roots are outside the collection's cubic vocabulary"
+          />
+          <Slider
+            label={`energy ${genome.field.energy.toFixed(2)}`}
+            min={0}
+            max={1}
+            step={0.01}
+            value={genome.field.energy}
+            onChange={(v) => patch((g) => ({ ...g, field: { ...g.field, energy: v } }))}
+          />
+          <Slider
+            label={`curvature ${genome.field.curvature.toFixed(2)}`}
+            min={0}
+            max={1}
+            step={0.01}
+            value={genome.field.curvature}
+            onChange={(v) => patch((g) => ({ ...g, field: { ...g.field, curvature: v } }))}
+          />
+        </LabWindow>
+
+        <LabWindow id="render" title="Render" desk={desk}>
+          <Slider
+            label={`rows ${genome.render.rows}`}
+            min={24}
+            max={240}
+            step={1}
+            value={genome.render.rows}
+            onChange={(v) => patch((g) => ({ ...g, render: { ...g.render, rows: v } }))}
+          />
+          <Slider
+            label={`spin ${genome.render.spin.toFixed(2)}`}
+            min={-0.6}
+            max={0.6}
+            step={0.01}
+            value={genome.render.spin}
+            onChange={(v) => patch((g) => ({ ...g, render: { ...g.render, spin: v } }))}
+          />
+          <Slider
+            label={`feedback ${genome.render.feedback.toFixed(2)}`}
+            min={0}
+            max={1}
+            step={0.01}
+            value={genome.render.feedback}
+            onChange={(v) => patch((g) => ({ ...g, render: { ...g.render, feedback: v } }))}
+            hint="the glyph grid displaces the geometry it just drew"
+          />
+        </LabWindow>
+
+        <LabWindow id="chain" title={`Operator chain ${genome.ops.length}/${MAX_OPS}`} desk={desk}>
+          {genome.ops.map((op, i) => (
+            <div className="lab-op" key={`${op.op}-${i}`}>
+              <div className="lab-op-head">
+                <select
+                  value={op.op}
+                  onChange={(e) =>
+                    patch((g) => {
+                      const name = e.target.value as OpName;
+                      g.ops[i] = {
+                        op: name,
+                        args: OP_RANGES[name].map(([lo, hi]) => (lo + hi) / 2),
+                      };
+                      return g;
+                    })
+                  }
+                >
+                  {OPS.map((o) => (
+                    <option key={o}>{o}</option>
+                  ))}
+                </select>
+                <button
+                  title="Remove"
+                  onClick={() =>
+                    patch((g) => {
+                      g.ops.splice(i, 1);
+                      return g;
+                    })
+                  }
+                >
+                  ✕
+                </button>
+              </div>
+              {OP_RANGES[op.op].map(([lo, hi], k) => (
+                <input
+                  key={k}
+                  type="range"
+                  min={lo}
+                  max={hi}
+                  step={(hi - lo) / 100}
+                  value={op.args[k] ?? lo}
+                  onChange={(e) =>
+                    patch((g) => {
+                      g.ops[i].args[k] = Number(e.target.value);
+                      return g;
+                    })
+                  }
+                />
+              ))}
+            </div>
+          ))}
+          <button
+            disabled={genome.ops.length >= MAX_OPS}
+            onClick={() =>
+              patch((g) => {
+                g.ops.push({ op: "warp", args: [0.6] });
+                return g;
+              })
+            }
+          >
+            + operator
+          </button>
+        </LabWindow>
+
+        <LabWindow id="kept" title={`Kept ${tray.length}/4`} desk={desk}>
+          {tray.length === 0 ? (
+            <span className="lab-hint">Keep a form to breed with it.</span>
+          ) : (
+            <div className="lab-chips">
+              {tray.map((g, i) => (
+                <button key={genomeKey(g) + i} onClick={() => apply(g)} title={encodeGenome(g)}>
+                  {genomeKey(g).slice(0, 6)}
+                </button>
+              ))}
+            </div>
+          )}
+        </LabWindow>
+
+        <LabWindow id="export" title="Export" desk={desk}>
+          <LabExportBar engine={engine} name={`cse-lab-${genomeKey(genome)}`} />
+        </LabWindow>
+      </div>
+    </div>
+  );
+}
+
+function Slider({
+  label,
+  min,
+  max,
+  step,
+  value,
+  onChange,
+  hint,
+}: {
+  label: string;
+  min: number;
+  max: number;
+  step: number;
+  value: number;
+  onChange: (v: number) => void;
+  hint?: string;
+}) {
+  return (
+    <div className="lab-slider">
+      <label>{label}</label>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+      {hint && <span className="lab-hint">{hint}</span>}
+    </div>
+  );
+}

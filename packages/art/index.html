@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Cubic Symmetry Engine</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+      }
+      body {
+        display: grid;
+        place-items: center;
+      }
+      #art {
+        display: block;
+        max-width: 100vmin;
+        max-height: 100vmin;
+      }
+      #hud {
+        position: fixed;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        padding: 10px 14px;
+        font: 11px/1.4 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+        letter-spacing: 0.06em;
+        color: #8a9;
+        background: linear-gradient(to top, rgba(0, 0, 0, 0.85), transparent);
+        text-transform: uppercase;
+        white-space: pre-wrap;
+        pointer-events: none;
+        opacity: 0.7;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="art"></canvas>
+    <div id="hud"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

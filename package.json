@@ -1,0 +1,21 @@
+{
+  "name": "cubic-symmetry-engine",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "pnpm@9.1.1",
+  "scripts": {
+    "dev": "node scripts/dev-local.mjs --live",
+    "dev:closed": "node scripts/dev-local.mjs",
+    "build": "pnpm --filter @cse/art build",
+    "test": "pnpm -r test && pnpm test:contracts",
+    "test:contracts": "cd packages/contracts && forge test",
+    "generate": "pnpm --filter @cse/generator generate",
+    "upload": "pnpm --filter @cse/generator upload",
+    "deploy": "node scripts/deploy.mjs",
+    "setup": "pnpm install && pnpm --filter @cse/generator exec playwright install chromium && cd packages/contracts && forge install",
+    "web": "pnpm --filter @cse/web dev"
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

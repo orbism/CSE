@@ -1,0 +1,28 @@
+{
+  "name": "@cse/generator",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "generate": "tsx src/cli.ts",
+    "cover": "tsx src/cover.ts",
+    "provenance": "tsx src/provenance-cli.ts",
+    "smoke": "tsx src/smoke.ts",
+    "calibrate": "tsx src/calibrate.ts",
+    "analyse": "tsx src/analyse.ts",
+    "distances": "tsx src/distances.ts",
+    "variety": "tsx src/variety.ts",
+    "upload": "tsx src/upload-cli.ts",
+    "forms": "tsx src/forms.ts"
+  },
+  "dependencies": {
+    "@cse/core": "workspace:*",
+    "@aws-sdk/client-s3": "^3.658.0",
+    "playwright": "^1.47.2",
+    "viem": "^2.21.19"
+  },
+  "devDependencies": {
+    "@types/node": "^22.7.4",
+    "tsx": "^4.19.1",
+    "typescript": "^5.5.4"
+  }
+}
