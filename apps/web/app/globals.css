@@ -2754,7 +2754,7 @@ footer {
   animation: loader-turn 1.5s cubic-bezier(0.6, 0, 0.3, 1) infinite;
 }
 
-.loader-triad path {
+.loader-triad .loader-edge {
   fill: none;
   stroke: var(--line-bright);
   stroke-width: 1.2;

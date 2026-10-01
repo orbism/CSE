@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { triadSvg } from "../lib/triad";
 
 export const THEMES = ["phosphor", "amber", "cobalt", "bloom", "ember", "prism"] as const;
 export const THEME_KEY = "cse-theme";
@@ -14,21 +15,18 @@ export const THEME_BOOT = `try{var t=localStorage.getItem("${THEME_KEY}");if(${J
 )}.indexOf(t)>0)document.documentElement.dataset.theme=t}catch(e){}`;
 
 /**
- * Repaint the tab icon in the live scheme: the ω-triad, three roots at thirds
+ * Repaint the tab icon in the live scheme: the ω-triad, three cubes at thirds
  * of a turn, in the same colours as the wordmark's C, S and E. Chrome, Edge and
  * Firefox follow a swapped icon; Safari keeps the one it loaded first.
  */
 function paintFavicon() {
   const css = getComputedStyle(document.documentElement);
   const v = (name: string) => css.getPropertyValue(name).trim();
-  const svg =
-    `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">` +
-    `<rect width="32" height="32" rx="6" fill="${v("--bg")}"/>` +
-    `<rect x="1" y="1" width="30" height="30" rx="5" fill="none" stroke="${v("--line-bright")}" stroke-width="1.5"/>` +
-    `<path d="M16 8.5 22.5 19.75H9.5Z" fill="none" stroke="${v("--line-bright")}" stroke-width="1.2"/>` +
-    `<circle cx="16" cy="8.5" r="4" fill="${v("--mark-c")}"/>` +
-    `<circle cx="22.5" cy="19.75" r="4" fill="${v("--mark-s")}"/>` +
-    `<circle cx="9.5" cy="19.75" r="4" fill="${v("--mark-e")}"/></svg>`;
+  const svg = triadSvg({
+    bg: v("--bg"),
+    line: v("--line-bright"),
+    marks: [v("--mark-c"), v("--mark-s"), v("--mark-e")],
+  });
   const href = `data:image/svg+xml,${encodeURIComponent(svg)}`;
   document.querySelectorAll<HTMLLinkElement>('link[rel~="icon"]').forEach((l) => (l.href = href));
 }
