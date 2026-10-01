@@ -12,7 +12,8 @@
     "distances": "tsx src/distances.ts",
     "variety": "tsx src/variety.ts",
     "upload": "tsx src/upload-cli.ts",
-    "forms": "tsx src/forms.ts"
+    "forms": "tsx src/forms.ts",
+    "compare": "tsx src/compare-engines.ts"
   },
   "dependencies": {
     "@cse/core": "workspace:*",

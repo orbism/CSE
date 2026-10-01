@@ -7,8 +7,8 @@
  * <span>s and cannot be rasterised to a 3000px PNG.
  */
 
-import * as THREE from "three";
 import type { Palette } from "@cse/core";
+import { WebGLRenderTarget } from "./gl/index.js";
 import { CELL_ASPECT, GLYPH_FONT } from "./font.js";
 
 /**
@@ -19,6 +19,30 @@ export const RAMP = [" ", ".", ":", "-", "=", "+", "*", "#", "%", "▒", "▓", 
 
 /** Supersampling factor per cell. Enough to antialias edges into the ramp. */
 const SS = 3;
+
+/** An offscreen colour target the pass renders into and reads back. */
+export interface GlyphTarget {
+  dispose(): void;
+}
+
+/**
+ * What the pass needs from a renderer. Both the CSE engine and three.js
+ * satisfy it, so the collection and the Lab share one pass.
+ */
+export interface GlyphRenderer {
+  getRenderTarget(): unknown;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setRenderTarget(target: any): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  render(scene: any, camera: any): void;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  readRenderTargetPixels(target: any, x: number, y: number, w: number, h: number, out: Uint8Array): void;
+}
+
+/** Makes the pass's render target: 4x multisampled, `w` x `h` pixels. */
+export type TargetFactory = (w: number, h: number) => GlyphTarget;
+
+const engineTarget: TargetFactory = (w, h) => new WebGLRenderTarget(w, h, { samples: 4 });
 
 export interface GlyphFrame {
   cols: number;
@@ -32,7 +56,7 @@ export interface GlyphFrame {
 export class GlyphPass {
   readonly cols: number;
   readonly rows: number;
-  private target: THREE.WebGLRenderTarget;
+  private target: GlyphTarget;
   private buffer: Uint8Array;
   private frame: GlyphFrame;
   private luma: Float32Array;
@@ -59,17 +83,12 @@ export class GlyphPass {
    *        Applied before auto-exposure on purpose: after it, the trail would
    *        drag the white point and the piece would pump.
    */
-  constructor(rows: number, feedback = 0) {
+  constructor(rows: number, feedback = 0, makeTarget: TargetFactory = engineTarget) {
     this.feedback = Math.max(0, Math.min(1, feedback));
     this.persistence = 0.8 + this.feedback * 0.12;
     this.rows = rows;
     this.cols = Math.round(rows / CELL_ASPECT);
-    this.target = new THREE.WebGLRenderTarget(this.cols * SS, this.rows * SS, {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      type: THREE.UnsignedByteType,
-      samples: 4,
-    });
+    this.target = makeTarget(this.cols * SS, this.rows * SS);
     this.buffer = new Uint8Array(this.cols * SS * this.rows * SS * 4);
     const cells = this.cols * this.rows;
     this.frame = {
@@ -90,9 +109,9 @@ export class GlyphPass {
 
   /** Render the scene and reduce it to a grid of glyph + ink indices. */
   sample(
-    renderer: THREE.WebGLRenderer,
-    scene: THREE.Scene,
-    camera: THREE.Camera,
+    renderer: GlyphRenderer,
+    scene: unknown,
+    camera: unknown,
   ): GlyphFrame {
     const prev = renderer.getRenderTarget();
     renderer.setRenderTarget(this.target);

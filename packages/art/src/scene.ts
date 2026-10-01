@@ -4,7 +4,7 @@
  * the demo box on the site and the pinned bundle produce identical output.
  */
 
-import * as THREE from "three";
+import * as THREE from "./gl/index.js";
 import { type Palette, type Token, rngFromHex } from "@cse/core";
 import { BUILDERS, FRAMING, type Anchor, type BuildContext } from "./archetypes.js";
 import { GlyphPass } from "./ascii.js";

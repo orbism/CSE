@@ -9,7 +9,9 @@
 
 import { type Token, deriveToken, tokenSummary } from "@cse/core";
 // Vite inlines the woff2 as a data URI, so the pinned bundle needs no network.
-import fontUrl from "./assets/JetBrainsMono-Regular.woff2?url";
+// A 5.4 KB subset of JetBrains Mono (OFL 1.1) that renders pixel-identically to
+// the full font. See assets/README.md before regenerating it.
+import fontUrl from "./assets/CSEGlyph.woff2?url";
 import { Engine } from "./renderer.js";
 
 const params = new URLSearchParams(location.search);

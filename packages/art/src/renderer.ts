@@ -3,7 +3,7 @@
  * the capture entry points the generator drives from Playwright.
  */
 
-import * as THREE from "three";
+import * as THREE from "./gl/index.js";
 import { type Token, deriveToken } from "@cse/core";
 import { GlyphPass } from "./ascii.js";
 import { loadGlyphFont } from "./font.js";

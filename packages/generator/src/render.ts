@@ -22,7 +22,7 @@ export function capturePose(phaseAngle: number, tokenId: number): number {
   return (phaseAngle * 2.5 + (tokenId % 7) * 0.31) % 12;
 }
 
-async function serve(root: string): Promise<{ server: Server; url: string }> {
+export async function serve(root: string): Promise<{ server: Server; url: string }> {
   const server = createServer(async (req, res) => {
     try {
       const path = (req.url ?? "/").split("?")[0];

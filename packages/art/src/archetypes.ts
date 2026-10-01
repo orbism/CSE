@@ -15,7 +15,7 @@
  *   shift      the depression's a/3, applied as a global translation
  */
 
-import * as THREE from "three";
+import * as THREE from "./gl/index.js";
 import type { Archetype, Palette, Rng } from "@cse/core";
 import { accent, dots, surface, wire } from "./materials.js";
 

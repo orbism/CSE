@@ -11,9 +11,17 @@
 import * as THREE from "three";
 import { PALETTES, type Palette, rngFromHex, sha256Hex } from "@cse/core";
 import { GlyphPass } from "../ascii.js";
-import { addLights, surface } from "../materials.js";
+import { makeMaterials } from "../materials.js";
 import type { Genome } from "./genome.js";
 import { MAX_TRIS, OPERATORS, type OpContext } from "./ops.js";
+
+/**
+ * The Lab stays on three.js: its operators lean on three's geometry toolkit,
+ * and none of it ships on chain. Same materials and lights as the collection,
+ * built from three's classes.
+ */
+const { addLights, surface } = makeMaterials(THREE);
+const threeTarget = (w: number, h: number) => new THREE.WebGLRenderTarget(w, h, { samples: 4 });
 
 export interface LabPiece {
   scene: THREE.Scene;
@@ -184,7 +192,7 @@ export function buildLabPiece(genome: Genome): LabPiece {
   return {
     scene,
     camera,
-    pass: new GlyphPass(genome.render.rows),
+    pass: new GlyphPass(genome.render.rows, 0, threeTarget),
     body: pivot,
     mesh,
     palette,

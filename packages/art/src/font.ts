@@ -23,7 +23,8 @@ export function loadGlyphFont(source: string): Promise<void> {
   if (existing) return existing;
 
   const promise = (async () => {
-    const face = new FontFace(GLYPH_FONT, `url(${source}) format("woff2")`);
+    // No format() hint: the browser sniffs the data, so any font container works.
+    const face = new FontFace(GLYPH_FONT, `url(${source})`);
     await face.load();
     // FontFaceSet.add is a Set method the DOM lib types omit on this target
     (document.fonts as unknown as Set<FontFace>).add(face);
