@@ -35,6 +35,15 @@ import { type Pop, type PopKind, VideoPop, popKind, popWindow } from "../lib/pop
 
 const MAX_PIXELS = 1400;
 
+/** Heat added per "Get weird" press: twenty to go from cold to fully hot. */
+const HEAT_STEP = 0.05;
+
+/**
+ * Heat as a colour: the strip's own ink at zero, then blue climbing the
+ * spectrum (cyan, green, yellow, orange) to red at 100%.
+ */
+const heatColor = (t: number) => (t <= 0 ? undefined : `hsl(${Math.round(220 * (1 - t))} 90% 62%)`);
+
 type FullKind = "window" | "screen";
 type FsDoc = Document & {
   webkitFullscreenElement?: Element;
@@ -365,9 +374,10 @@ export function Lab() {
    * temperature — longer chains, wilder operators, parameters pushed to their
    * limits — so holding it down travels somewhere rather than resampling the
    * same neighbourhood. Anything already served this session is rerolled.
+   * Twenty presses from cold to fully hot.
    */
   const getWeird = useCallback(() => {
-    const t = Math.min(1, temperature + 0.18);
+    const t = Math.min(1, temperature + HEAT_STEP);
     setTemperature(t);
     for (let attempt = 0; attempt < 24; attempt++) {
       const g = randomGenome(`${Date.now()}-${attempt}-${Math.random()}`, t);
@@ -387,6 +397,8 @@ export function Lab() {
    */
   const loadForm = (form: { id: number; nonce: number }) => {
     const token = deriveToken(MASTER_SEED, form.id, form.nonce);
+    // a fresh starting shape starts cold
+    setTemperature(0);
     apply({
       ...genome,
       form,
@@ -465,7 +477,9 @@ export function Lab() {
               <canvas ref={canvasRef} />
             </div>
             <div className="lab-canvas-info" aria-live="off">
-              drag to turn · {triangles.toLocaleString()} triangles · heat {(temperature * 100) | 0}%
+              {genome.form && <>loaded CSE #{String(genome.form.id).padStart(4, "0")} · </>}
+              drag to turn · {triangles.toLocaleString()} triangles · heat{" "}
+              <span style={{ color: heatColor(temperature) }}>{Math.round(temperature * 100)}%</span>
             </div>
             {popped && popAvail === "window" && (
               <button className="lab-popped" onPointerDown={(ev) => ev.stopPropagation()} onClick={togglePop}>
