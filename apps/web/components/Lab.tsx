@@ -22,6 +22,8 @@ import Link from "next/link";
 import { LabExportBar } from "./LabExportBar";
 import { DESK_QUERY, LabWindow, useDesk } from "./LabDesk";
 import { LabTips } from "./LabTips";
+import { RadioSpectrum } from "./RadioSpectrum";
+import { getRadio } from "../lib/radio";
 import { WordmarkText } from "./Masthead";
 import { AudioMeter } from "./AudioMeter";
 import { AudioDrive, DEFAULT_TUNING, type AudioSource, type AudioTuning } from "../lib/audio";
@@ -161,16 +163,21 @@ export function Lab() {
     engineRef.current?.setDrive(null);
     audioRef.current?.close();
     audioRef.current = null;
+    getRadio().setFeed(null);
     setAudio(null);
   }, []);
 
   const startAudio = async (source: AudioSource) => {
     stopAudio();
     setAudioError("");
+    // A mic or a shared tab would hear the site radio too; stop it first.
+    if (source !== "radio") getRadio().pause();
     try {
       const drive = await AudioDrive.open(source, stopAudio);
       drive.tuning = tuning;
       audioRef.current = drive;
+      // the header spectrum follows whatever the Lab is hearing
+      if (source !== "radio") getRadio().setFeed(drive);
       if (popWinRef.current) drive.setFrameWindow(popWinRef.current);
       engineRef.current?.setDrive(drive.read);
       setAudio({ source, drive });
@@ -376,6 +383,7 @@ export function Lab() {
           </Link>
         )}
         {full && <span className="lab-bar-title">Lab</span>}
+        {full && <RadioSpectrum className="lab-bar-spectrum" />}
         <LabTips />
         <div className="lab-bar-tools">
           <button onClick={desk.tidy} title="Snap everything to a clean grid; sizes are kept">
@@ -526,7 +534,14 @@ export function Lab() {
               mic / line-in
             </button>
             <button
-              className={advanced ? "on" : ""}
+              className={audio?.source === "radio" ? "on" : ""}
+              onClick={() => startAudio("radio")}
+              title="CSE Radio, the player at the bottom of the page, straight in"
+            >
+              CSE Radio
+            </button>
+            <button
+              className={`lab-advanced${advanced ? " on" : ""}`}
               onClick={() => setAdvanced((a) => !a)}
               title="Per-effect controls"
             >

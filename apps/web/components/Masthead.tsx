@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ConnectButton } from "./ConnectButton";
+import { RadioSpectrum } from "./RadioSpectrum";
 import { ThemeSwitch } from "./ThemeSwitch";
 
 const RULE = "═".repeat(400);
@@ -27,20 +28,25 @@ export function Masthead() {
               <WordmarkText />
             </h1>
           </Link>
-          <nav className="nav">
-            {NAV.map((n, i) => (
-              <span key={n.href}>
-                {i > 0 && <span className="nav-sep">|</span>}
-                <Link
-                  href={n.href}
-                  title={n.hint}
-                  className={pathname === n.href ? "on" : undefined}
-                >
-                  {n.label}
-                </Link>
-              </span>
-            ))}
-          </nav>
+          {/* The radio's spectrum hangs under the nav, as wide as it, rising off
+              the header's bottom rule. */}
+          <div className="nav-wrap">
+            <nav className="nav">
+              {NAV.map((n, i) => (
+                <span key={n.href}>
+                  {i > 0 && <span className="nav-sep">|</span>}
+                  <Link
+                    href={n.href}
+                    title={n.hint}
+                    className={pathname === n.href ? "on" : undefined}
+                  >
+                    {n.label}
+                  </Link>
+                </span>
+              ))}
+            </nav>
+            <RadioSpectrum className="nav-spectrum" />
+          </div>
         </div>
         <div className="masthead-tools">
           <ThemeSwitch />

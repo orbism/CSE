@@ -65,6 +65,8 @@
   --body: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
   --gutter: clamp(16px, 3vw, 40px);
+  /* Height of the radio strip pinned to the bottom of every page. */
+  --radio-h: 32px;
 }
 
 [data-theme="amber"] {
@@ -2723,4 +2725,221 @@ footer {
   color: var(--warn);
   font-size: 15px;
   margin: 0 0 12px;
+}
+
+/* ── section loader ─────────────────────────────────────────────────────── */
+
+/* Fades in after a beat, so a fast section switch never flashes it. */
+.loader {
+  display: grid;
+  place-items: center;
+  min-height: 50vh;
+  opacity: 0;
+  animation: loader-in 0.3s ease-out 0.15s forwards;
+}
+
+.loader svg {
+  width: 56px;
+  height: 56px;
+  overflow: visible;
+  filter: drop-shadow(var(--glow));
+}
+
+/* Rotates about the triangle's centroid, a third of a turn per step: each
+   root lands where the next one was, the way the phase relabels them. */
+.loader-triad {
+  transform-origin: 16px 16px;
+  animation: loader-turn 1.5s cubic-bezier(0.6, 0, 0.3, 1) infinite;
+}
+
+.loader-triad path {
+  fill: none;
+  stroke: var(--line-bright);
+  stroke-width: 1.2;
+}
+
+.mark-c-fill { fill: var(--mark-c); }
+.mark-s-fill { fill: var(--mark-s); }
+.mark-e-fill { fill: var(--mark-e); }
+
+@keyframes loader-in {
+  to { opacity: 1; }
+}
+
+@keyframes loader-turn {
+  0% { transform: rotate(0deg); }
+  33.33% { transform: rotate(120deg); }
+  66.66% { transform: rotate(240deg); }
+  100% { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loader-triad {
+    animation: none;
+  }
+  .loader svg {
+    animation: loader-in 0.8s ease-in-out infinite alternate;
+  }
+}
+
+/* ── site radio ─────────────────────────────────────────────────────────── */
+
+body {
+  padding-bottom: var(--radio-h);
+}
+
+.radio {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 95;
+  height: var(--radio-h);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  font-family: var(--body);
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.radio button {
+  height: 24px;
+  min-width: 30px;
+  padding: 0 8px;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 0;
+  border-color: var(--line);
+}
+
+.radio-play {
+  color: var(--accent);
+}
+
+.radio-play.on {
+  border-color: var(--accent-dim);
+  text-shadow: var(--glow);
+}
+
+.radio-marquee {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  margin: 0 6px;
+  white-space: nowrap;
+  letter-spacing: 0.06em;
+}
+
+.radio-track {
+  display: inline-flex;
+  animation: radio-scroll linear infinite;
+}
+
+.radio-track span {
+  padding-right: 64px;
+}
+
+.radio-track b {
+  font-weight: 400;
+  color: var(--accent);
+  text-shadow: var(--glow);
+}
+
+@keyframes radio-scroll {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.radio .radio-mute {
+  width: 34px;
+  height: 22px;
+  padding: 0 2px;
+  border: 0;
+  display: grid;
+  place-items: center;
+}
+
+.radio-mute canvas {
+  display: block;
+}
+
+.radio-volume {
+  width: 72px;
+  flex: none;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radio-track {
+    animation: none;
+  }
+  .radio-track span + span {
+    display: none;
+  }
+}
+
+/* The spectrum: hidden until the radio plays, then bars off its bottom edge. */
+.radio-spectrum {
+  display: block;
+  pointer-events: none;
+  opacity: 0;
+  /* outlasts the audio's fade-out, so the bars visibly sink before it goes */
+  transition: opacity 1.4s ease-in;
+  filter: drop-shadow(var(--glow));
+}
+
+.radio-spectrum.on {
+  opacity: 1;
+}
+
+/* Under the nav, its width, down to the header's bottom rule: the masthead's
+   bottom padding plus the rule's own top padding. */
+/* A block, so it stays under the wordmark; fit-content, so it is the nav's width. */
+.nav-wrap {
+  position: relative;
+  width: fit-content;
+}
+
+/* Same bottom edge on the rule; starting 8px below the nav leaves it room. */
+.nav-spectrum {
+  position: absolute;
+  left: 0;
+  top: calc(100% + 8px);
+  width: 100%;
+  height: 20px;
+}
+
+/* Full modes: beside LAB, LAB's height; wordmark, LAB, spectrum evenly spaced.
+   The desk stops short of the radio strip. */
+.lab-bar-spectrum {
+  width: 200px;
+  height: 38px;
+  flex: none;
+}
+
+.lab-full .lab-bar {
+  gap: 28px;
+}
+
+.lab-full {
+  bottom: var(--radio-h);
+}
+
+/* Sound's "advanced": a view toggle, not an input, so it is outlined apart
+   from the source buttons beside it. */
+.lab-chips.lab-sound-src .lab-advanced {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--line-bright));
+  margin-left: 6px;
+}
+
+.lab-chips.lab-sound-src .lab-advanced.on {
+  border-style: solid;
 }

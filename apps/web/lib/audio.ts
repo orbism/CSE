@@ -1,13 +1,15 @@
 import type { LabDrive } from "@cse/art";
+import { getRadio } from "./radio";
 
 /**
  * Music in, LabDrive out.
  *
- * Browsers cannot read "whatever the system is playing" directly. Two routes:
+ * Browsers cannot read "whatever the system is playing" directly. Three routes:
  *   share  getDisplayMedia with audio — a Chrome/Edge tab's audio, or the whole
  *          system's where the OS allows (Windows; macOS on recent Chrome).
  *   input  getUserMedia — a mic, or a loopback device (BlackHole, Loopback,
  *          VB-Cable) that carries system audio as an input.
+ *   radio  the site's own radio (lib/radio), tapped straight off its graph.
  *
  * Analysis runs on its own animation frame, independent of the engine, so the
  * meters keep moving while the form is paused.
@@ -26,7 +28,7 @@ import type { LabDrive } from "@cse/art";
  * Each beat fires a damped spring: out hard, back past rest, settle — which is
  * what makes it read as a pump rather than a swell.
  */
-export type AudioSource = "share" | "input";
+export type AudioSource = "share" | "input" | "radio";
 
 export interface AudioTuning {
   sensitivity: number;
@@ -74,6 +76,50 @@ const LEVELS: [number, number][] = [
   [4000, 12000],
 ];
 const HAT: [number, number] = [6000, 14000];
+
+const LO_HZ = 30;
+const HI_HZ = 16000;
+
+/**
+ * Bar `i` of `count` log-spaced bars from 30 Hz to 16 kHz, like a hardware EQ:
+ * the loudest bin in its band, 0..1. Shared by the Lab meter and the header.
+ */
+export function logBar(bins: Uint8Array, binHz: number, i: number, count: number): number {
+  const f0 = LO_HZ * Math.pow(HI_HZ / LO_HZ, i / count);
+  const f1 = LO_HZ * Math.pow(HI_HZ / LO_HZ, (i + 1) / count);
+  const b0 = Math.max(1, Math.floor(f0 / binHz));
+  const b1 = Math.max(b0, Math.min(bins.length - 1, Math.floor(f1 / binHz)));
+  let v = 0;
+  for (let b = b0; b <= b1; b++) v = Math.max(v, bins[b]);
+  return v / 255;
+}
+
+/**
+ * Peak caps for a bar meter: each bar's highest recent level hangs for `hold`
+ * frames, then drifts down by `fall` a frame. Shared by the Lab meter and the
+ * header spectrum so they move alike.
+ */
+export class PeakHold {
+  private peaks: Float32Array;
+  private holds: Uint16Array;
+  constructor(
+    readonly count: number,
+    private hold = 24,
+    private fall = 0.012,
+  ) {
+    this.peaks = new Float32Array(count);
+    this.holds = new Uint16Array(count);
+  }
+  /** Feed bar `i` its level; returns where its cap sits now. */
+  update(i: number, v: number): number {
+    if (v >= this.peaks[i]) {
+      this.peaks[i] = v;
+      this.holds[i] = this.hold;
+    } else if (this.holds[i] > 0) this.holds[i]--;
+    else this.peaks[i] = Math.max(0, this.peaks[i] - this.fall);
+    return this.peaks[i];
+  }
+}
 
 const NO_PROCESSING = { echoCancellation: false, noiseSuppression: false, autoGainControl: false };
 
@@ -149,17 +195,22 @@ export class AudioDrive {
   private raf = 0;
   private lastT = 0;
 
+  /**
+   * @param input   what to analyse; never connected onward to the speakers, so
+   *                a mic or a shared tab doesn't echo
+   * @param release frees what `open` acquired (tracks, context); the radio's
+   *                are shared with the site and left alone
+   */
   private constructor(
-    private ctx: AudioContext,
-    private stream: MediaStream,
-    onEnded: () => void,
+    ctx: AudioContext,
+    private input: AudioNode,
+    private release: () => void,
   ) {
     this.analyser = ctx.createAnalyser();
     this.analyser.fftSize = 2048;
     // Low: flux needs the attack, the envelopes below do the smoothing.
     this.analyser.smoothingTimeConstant = 0.3;
-    // Not connected to the destination: listening only, no echo.
-    const src = ctx.createMediaStreamSource(stream);
+    const src = input;
     src.connect(this.analyser);
 
     // Kick path: 12 dB/oct high-pass, 24 dB/oct low-pass, then a short window.
@@ -178,7 +229,6 @@ export class AudioDrive {
     this.bins = new Uint8Array(this.analyser.frequencyBinCount);
     this.prev = new Uint8Array(this.bins.length);
     this.binHz = ctx.sampleRate / this.analyser.fftSize;
-    for (const t of stream.getAudioTracks()) t.addEventListener("ended", onEnded);
     this.schedule();
   }
 
@@ -199,7 +249,12 @@ export class AudioDrive {
     this.schedule();
   }
 
+  /** Call from a click: every route needs the user gesture to start. */
   static async open(source: AudioSource, onEnded: () => void): Promise<AudioDrive> {
+    if (source === "radio") {
+      const { ctx, source: node } = getRadio().tap();
+      return new AudioDrive(ctx, node, () => {});
+    }
     const ctx = new AudioContext();
     let stream: MediaStream;
     try {
@@ -220,7 +275,11 @@ export class AudioDrive {
       ctx.close();
       throw new Error("No audio in that share. Pick a tab or screen and tick “Share audio”.");
     }
-    return new AudioDrive(ctx, stream, onEnded);
+    for (const t of stream.getAudioTracks()) t.addEventListener("ended", onEnded);
+    return new AudioDrive(ctx, ctx.createMediaStreamSource(stream), () => {
+      stream.getTracks().forEach((t) => t.stop());
+      ctx.close();
+    });
   }
 
   /** For the engine: the latest drive. */
@@ -344,7 +403,8 @@ export class AudioDrive {
 
   close() {
     this.host.cancelAnimationFrame(this.raf);
-    this.stream.getTracks().forEach((t) => t.stop());
-    this.ctx.close();
+    this.input.disconnect(this.analyser);
+    this.input.disconnect(this.kickFilters[0]);
+    this.release();
   }
 }
