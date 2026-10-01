@@ -10,9 +10,22 @@ import { activeChain } from "@/lib/config";
  * installed wallets through EIP-6963, each with its own name and icon — and
  * connects straight to the collection's chain. Closes once connected.
  *
- * Portalled to <body> so no panel's stacking or overflow can clip it.
+ * Portalled to <body> (or `container`) so no panel's stacking or overflow can
+ * clip it. The Lab passes its own root, which is what's visible in true full
+ * screen, where nothing outside the full-screen element shows.
  */
-export function ConnectModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function ConnectModal({
+  open,
+  onClose,
+  onConnected,
+  container,
+}: {
+  open: boolean;
+  onClose: () => void;
+  /** Called instead of `onClose` once a wallet connects. */
+  onConnected?: () => void;
+  container?: Element | null;
+}) {
   const { connectors, connectAsync } = useConnect();
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -73,7 +86,7 @@ export function ConnectModal({ open, onClose }: { open: boolean; onClose: () => 
                     setError("");
                     try {
                       await connectAsync({ connector: c, chainId: activeChain.id });
-                      onClose();
+                      (onConnected ?? onClose)();
                     } catch (e) {
                       setError((e as { shortMessage?: string }).shortMessage ?? String(e).split("\n")[0]);
                     } finally {
@@ -97,6 +110,6 @@ export function ConnectModal({ open, onClose }: { open: boolean; onClose: () => 
         </div>
       </div>
     </div>,
-    document.body,
+    container ?? document.body,
   );
 }

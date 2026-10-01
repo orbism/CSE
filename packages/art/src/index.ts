@@ -29,6 +29,7 @@ export {
   normalise,
   randomGenome,
   type BaseName,
+  type FormRef,
   type Genome,
   type Op,
   type OpName,

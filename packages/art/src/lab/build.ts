@@ -12,6 +12,7 @@ import * as THREE from "three";
 import { PALETTES, type Palette, rngFromHex, sha256Hex } from "@cse/core";
 import { GlyphPass } from "../ascii.js";
 import { makeMaterials } from "../materials.js";
+import { formGeometry } from "./form.js";
 import type { Genome } from "./genome.js";
 import { MAX_TRIS, OPERATORS, type OpContext } from "./ops.js";
 
@@ -96,7 +97,11 @@ export function paletteByName(name: string): Palette {
   return PALETTES.find((p) => p.name === name) ?? PALETTES[0];
 }
 
-export function buildLabPiece(genome: Genome): LabPiece {
+/**
+ * @param master the collection's master seed; only read when the genome starts
+ *               from a collection Form, which is derived from it
+ */
+export function buildLabPiece(genome: Genome, master = "CUBIC-SYMMETRY-ENGINE"): LabPiece {
   const palette = paletteByName(genome.render.palette);
   const roots = rootsFor(genome);
   const rng = rngFromHex(sha256Hex(`${genome.seed}:ops`));
@@ -108,7 +113,7 @@ export function buildLabPiece(genome: Genome): LabPiece {
     rand: () => rng.next(),
   };
 
-  let geo = baseGeometry(genome.base, genome.field.curvature);
+  let geo = genome.form ? formGeometry(master, genome.form) : baseGeometry(genome.base, genome.field.curvature);
   for (const step of genome.ops) {
     const op = OPERATORS[step.op];
     if (!op) continue;

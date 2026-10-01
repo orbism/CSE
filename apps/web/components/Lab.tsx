@@ -17,7 +17,11 @@ import {
   type Genome,
   type OpName,
 } from "@cse/art";
-import { PALETTES } from "@cse/core";
+import { PALETTES, deriveToken } from "@cse/core";
+import { useAccount } from "wagmi";
+import { MASTER_SEED } from "../lib/config";
+import { ConnectModal } from "./ConnectModal";
+import { FormPickerModal } from "./FormPickerModal";
 import Link from "next/link";
 import { LabExportBar } from "./LabExportBar";
 import { DESK_QUERY, LabWindow, useDesk } from "./LabDesk";
@@ -102,6 +106,9 @@ export function Lab() {
   const [advanced, setAdvanced] = useState(false);
   /** "window": the desk fills the browser viewport. "screen": true full screen. */
   const [full, setFull] = useState<FullKind | null>(null);
+  /** "load yours": connect first if needed, then pick a Form. */
+  const [picker, setPicker] = useState<"connect" | "forms" | null>(null);
+  const { isConnected } = useAccount();
   const [canTrueFull, setCanTrueFull] = useState(false);
   const [popAvail, setPopAvail] = useState<PopKind | null>(null);
   const [popped, setPopped] = useState(false);
@@ -136,7 +143,7 @@ export function Lab() {
       );
     measureRef.current = measure;
 
-    LabEngine.create({ canvas, size: measure(), fontUrl: "/fonts/JetBrainsMono-Regular.woff2" })
+    LabEngine.create({ canvas, size: measure(), fontUrl: "/fonts/JetBrainsMono-Regular.woff2", master: MASTER_SEED })
       .then((e) => {
         if (disposed) {
           e.dispose();
@@ -374,6 +381,24 @@ export function Lab() {
 
   const patch = (fn: (g: Genome) => Genome) => apply(fn(structuredClone(genome)));
 
+  /**
+   * A collection Form becomes the chain's starting shape, in its own palette
+   * and glyph density, with an empty chain to build on.
+   */
+  const loadForm = (form: { id: number; nonce: number }) => {
+    const token = deriveToken(MASTER_SEED, form.id, form.nonce);
+    apply({
+      ...genome,
+      form,
+      ops: [],
+      render: {
+        ...genome.render,
+        palette: token.traits.palette.name,
+        rows: Math.max(24, Math.min(240, token.drivers.density)),
+      },
+    });
+  };
+
   return (
     <div ref={rootRef} className={`lab${full ? " lab-full" : ""}`}>
       <div className="lab-bar">
@@ -439,6 +464,9 @@ export function Lab() {
             <div className="lab-canvas-slot">
               <canvas ref={canvasRef} />
             </div>
+            <div className="lab-canvas-info" aria-live="off">
+              drag to turn · {triangles.toLocaleString()} triangles · heat {(temperature * 100) | 0}%
+            </div>
             {popped && popAvail === "window" && (
               <button className="lab-popped" onPointerDown={(ev) => ev.stopPropagation()} onClick={togglePop}>
                 ⧉ popped out · click to bring it back
@@ -493,11 +521,14 @@ export function Lab() {
               >
                 {copied ? "Copied ✓" : "Copy link"}
               </button>
+              <button
+                className="lab-load"
+                onClick={() => setPicker(isConnected ? "forms" : "connect")}
+                title="Load a CSE Form from your wallet as the starting shape"
+              >
+                {isConnected ? "Load yours" : "Connect wallet"}
+              </button>
             </div>
-            <span className="tooling-hint">
-              drag to turn · {triangles.toLocaleString()} triangles · heat{" "}
-              {(temperature * 100) | 0}%
-            </span>
           </div>
 
           <div className="lab-dock-genotype">
@@ -579,12 +610,17 @@ export function Lab() {
 
         <LabWindow id="presets" title="Base · palette" desk={desk} col={advanced ? 2 : 0}>
           <div className="mono-label">Base</div>
+          {genome.form && (
+            <p className="lab-hint">
+              Starting from CSE #{String(genome.form.id).padStart(4, "0")}. Pick a base to drop it.
+            </p>
+          )}
           <div className="lab-chips">
             {BASES.map((b) => (
               <button
                 key={b}
-                className={genome.base === b ? "on" : ""}
-                onClick={() => patch((g) => ({ ...g, base: b as BaseName }))}
+                className={genome.base === b && !genome.form ? "on" : ""}
+                onClick={() => patch((g) => ({ ...g, base: b as BaseName, form: undefined }))}
               >
                 {b}
               </button>
@@ -744,6 +780,19 @@ export function Lab() {
           <LabExportBar engine={engine} name={`cse-lab-${genomeKey(genome)}`} />
         </LabWindow>
       </div>
+      {/* connecting from "load yours" carries straight on to the picker */}
+      <ConnectModal
+        open={picker === "connect"}
+        onClose={() => setPicker(null)}
+        onConnected={() => setPicker("forms")}
+        container={rootRef.current}
+      />
+      <FormPickerModal
+        open={picker === "forms"}
+        onClose={() => setPicker(null)}
+        onLoad={loadForm}
+        container={rootRef.current}
+      />
     </div>
   );
 }

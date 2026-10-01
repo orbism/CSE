@@ -97,10 +97,18 @@ export interface Op {
   args: number[];
 }
 
+/** A collection Form, as the Lab's starting shape: token id and its settled nonce. */
+export interface FormRef {
+  id: number;
+  nonce: number;
+}
+
 export interface Genome {
   /** Hex; seeds the deterministic Rng every operator draws from. */
   seed: string;
   base: BaseName;
+  /** When set, the chain starts from this collection Form instead of `base`. */
+  form?: FormRef;
   ops: Op[];
   field: {
     /** Number of roots. 4 and 5 are outside the collection's cubic vocabulary. */
@@ -203,9 +211,12 @@ export function breed(a: Genome, b: Genome, seedHex: string): Genome {
   const ops = [...a.ops.slice(0, cutA), ...b.ops.slice(cutB)].slice(0, MAX_OPS);
   if (ops.length === 0) ops.push({ op: rng.pick(OPS), args: [] });
 
+  const parent = rng.chance(0.5) ? a : b;
   const child: Genome = {
     seed: seedHex,
-    base: rng.chance(0.5) ? a.base : b.base,
+    // a loaded Form travels with the base it replaced
+    base: parent.base,
+    ...(parent.form ? { form: { ...parent.form } } : {}),
     ops: ops.map((o) => ({ op: o.op, args: [...o.args] })),
     field: rng.chance(0.5) ? { ...a.field } : { ...b.field },
     render: { ...(rng.chance(0.5) ? a.render : b.render) },
@@ -250,6 +261,9 @@ export function normalise(g: Genome): Genome {
  *
  *   seed_base_rows_palette_spin_feedback_degree_energy_curvature~op:a,b~op:a
  *
+ * A chain started from a collection Form writes `f<id>n<nonce>` where the base
+ * goes (`f122n0`), so older links decode exactly as before.
+ *
  * Deliberately not JSON+base64: a genotype people are meant to share, tweak by
  * hand and recognise should be legible in the address bar.
  *
@@ -262,7 +276,7 @@ const SEP = "_";
 export function encodeGenome(g: Genome): string {
   const head = [
     g.seed,
-    g.base,
+    g.form ? `f${g.form.id}n${g.form.nonce}` : g.base,
     g.render.rows,
     g.render.palette,
     g.render.spin,
@@ -281,6 +295,7 @@ export function decodeGenome(s: string): Genome | null {
     const f = head.split(SEP);
     if (f.length < 9) return null;
     const base = BASES.includes(f[1] as BaseName) ? (f[1] as BaseName) : "icosa";
+    const fm = /^f(\d+)n(\d+)$/.exec(f[1]);
     const degree = ([3, 4, 5].includes(Number(f[6])) ? Number(f[6]) : 3) as 3 | 4 | 5;
 
     const ops: Op[] = [];
@@ -300,6 +315,7 @@ export function decodeGenome(s: string): Genome | null {
     return normalise({
       seed: f[0] || "0",
       base,
+      ...(fm ? { form: { id: Number(fm[1]), nonce: Number(fm[2]) } } : {}),
       ops,
       field: {
         degree,
