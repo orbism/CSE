@@ -21,23 +21,37 @@ import { PALETTES } from "@cse/core";
 import Link from "next/link";
 import { LabExportBar } from "./LabExportBar";
 import { DESK_QUERY, LabWindow, useDesk } from "./LabDesk";
+import { LabTips } from "./LabTips";
+import { WordmarkText } from "./Masthead";
 import { AudioMeter } from "./AudioMeter";
 import { AudioDrive, DEFAULT_TUNING, type AudioSource, type AudioTuning } from "../lib/audio";
+import { type Pop, type PopKind, VideoPop, popKind, popWindow } from "../lib/popout";
 
 const MAX_PIXELS = 1400;
 
-/** Advanced sound controls, grouped; each group can detach into its own window. */
+type FullKind = "window" | "screen";
+type FsDoc = Document & {
+  webkitFullscreenElement?: Element;
+  webkitFullscreenEnabled?: boolean;
+  webkitExitFullscreen?: () => void;
+};
+const fsElement = () => document.fullscreenElement ?? (document as FsDoc).webkitFullscreenElement;
+
+/** Advanced sound controls, one window per group, stacked under a two-wide Sound. */
 const SOUND_SECTIONS: {
   id: string;
   title: string;
+  col: number;
   knobs: [keyof AudioTuning, number, number, string?][];
 }[] = [
   {
     id: "pulse",
     title: "Pulse",
+    col: 0,
     knobs: [
       ["pump", 0, 2],
       ["snap", 0.3, 2, "pulse length — lower is tighter"],
+      ["kickHz", 35, 120, "kick band — lower isolates the kick from the bass line"],
       ["squash", 0, 2],
       ["breathe", 0, 2, "swell with the bass level"],
     ],
@@ -45,6 +59,7 @@ const SOUND_SECTIONS: {
   {
     id: "motion",
     title: "Motion",
+    col: 1,
     knobs: [
       ["spin", 0, 2],
       ["whip", 0, 2, "spin kick per beat"],
@@ -54,6 +69,7 @@ const SOUND_SECTIONS: {
   {
     id: "surface",
     title: "Surface",
+    col: 1,
     knobs: [
       ["feedback", 0, 2],
       ["glitch", 0, 2],
@@ -82,8 +98,11 @@ export function Lab() {
   const [audioError, setAudioError] = useState("");
   const [tuning, setTuning] = useState<AudioTuning>(DEFAULT_TUNING);
   const [advanced, setAdvanced] = useState(false);
-  const [full, setFull] = useState(false);
-  const [detached, setDetached] = useState<string[]>([]);
+  /** "window": the desk fills the browser viewport. "screen": true full screen. */
+  const [full, setFull] = useState<FullKind | null>(null);
+  const [canTrueFull, setCanTrueFull] = useState(false);
+  const [popAvail, setPopAvail] = useState<PopKind | null>(null);
+  const [popped, setPopped] = useState(false);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -91,6 +110,11 @@ export function Lab() {
   const seenRef = useRef<Set<string>>(new Set());
   const dragRef = useRef<{ x: number; y: number } | null>(null);
   const audioRef = useRef<AudioDrive | null>(null);
+  const measureRef = useRef<() => number>(() => 0);
+  const popRef = useRef<Pop | null>(null);
+  /** The pop-out window while the canvas lives in it. */
+  const popWinRef = useRef<Window | null>(null);
+  const videoPopRef = useRef<VideoPop | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const deskRef = useRef<HTMLDivElement>(null);
   const dockRef = useRef<HTMLDivElement>(null);
@@ -108,6 +132,7 @@ export function Lab() {
         200,
         Math.min(MAX_PIXELS, Math.round(wrap.clientWidth * Math.min(2, window.devicePixelRatio || 1))),
       );
+    measureRef.current = measure;
 
     LabEngine.create({ canvas, size: measure(), fontUrl: "/fonts/JetBrainsMono-Regular.woff2" })
       .then((e) => {
@@ -120,7 +145,8 @@ export function Lab() {
       })
       .catch((err) => console.error("lab engine failed to start", err));
 
-    const observer = new ResizeObserver(() => engineRef.current?.resize(measure()));
+    // While popped out, the pop-out's size rules, not the dock's.
+    const observer = new ResizeObserver(() => !popWinRef.current && engineRef.current?.resize(measure()));
     observer.observe(wrap);
     return () => {
       disposed = true;
@@ -145,6 +171,7 @@ export function Lab() {
       const drive = await AudioDrive.open(source, stopAudio);
       drive.tuning = tuning;
       audioRef.current = drive;
+      if (popWinRef.current) drive.setFrameWindow(popWinRef.current);
       engineRef.current?.setDrive(drive.read);
       setAudio({ source, drive });
       setSpinning(true);
@@ -160,10 +187,10 @@ export function Lab() {
   const tune = (key: keyof AudioTuning, min: number, max: number, label: string = key, hint?: string) => (
     <Slider
       key={key}
-      label={`${label} ${tuning[key].toFixed(2)}`}
+      label={`${label} ${tuning[key].toFixed(max > 10 ? 0 : 2)}`}
       min={min}
       max={max}
-      step={0.01}
+      step={max > 10 ? 1 : 0.01}
       value={tuning[key]}
       onChange={(v) => setTuning((t) => ({ ...t, [key]: v }))}
       hint={hint}
@@ -172,33 +199,48 @@ export function Lab() {
 
   useEffect(() => stopAudio, [stopAudio]);
 
-  // ---- full screen: the desk takes the viewport. The Fullscreen API where the
-  // browser has it (desktop, iPad), a fixed overlay either way.
-  const exitFull = useCallback(() => {
-    setFull(false);
-    const d = document as Document & { webkitFullscreenElement?: Element; webkitExitFullscreen?: () => void };
-    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
-    else if (d.webkitFullscreenElement) d.webkitExitFullscreen?.();
+  // Advanced reshapes the desk (Sound doubles, its groups stack beneath), so it
+  // re-tidies to the layout designed for it.
+  const { tidy } = desk;
+  useEffect(() => tidy(), [advanced, tidy]);
+
+  // ---- full modes. Both lay the desk over the page; "screen" also asks the
+  // browser for real full screen (desktop, iPad), which phones can't do.
+  useEffect(() => {
+    const d = document as FsDoc;
+    setCanTrueFull(!!(d.fullscreenEnabled ?? d.webkitFullscreenEnabled));
   }, []);
 
-  const enterFull = () => {
-    setFull(true);
-    const el = rootRef.current as (HTMLElement & { webkitRequestFullscreen?: () => void }) | null;
-    if (el?.requestFullscreen) el.requestFullscreen().catch(() => {});
-    else el?.webkitRequestFullscreen?.();
+  const leaveTrueFull = () => {
+    const d = document as FsDoc;
+    if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+    else if (d.webkitFullscreenElement) d.webkitExitFullscreen?.();
+  };
+
+  const exitFull = useCallback(() => {
+    setFull(null);
+    if (fsElement()) leaveTrueFull();
+  }, []);
+
+  const toggleFull = (kind: FullKind) => {
+    if (full === kind) return exitFull();
+    if (kind === "screen") {
+      const el = rootRef.current as (HTMLElement & { webkitRequestFullscreen?: () => void }) | null;
+      if (el?.requestFullscreen) el.requestFullscreen().catch(() => setFull("window"));
+      else el?.webkitRequestFullscreen?.();
+    } else if (fsElement()) leaveTrueFull();
+    setFull(kind);
   };
 
   useEffect(() => {
     if (!full) return;
-    const d = document as Document & { webkitFullscreenElement?: Element };
     let entered = false;
     const onChange = () => {
-      const now = !!(document.fullscreenElement ?? d.webkitFullscreenElement);
-      if (now) entered = true;
-      else if (entered) setFull(false); // left via Esc or the browser's own control
+      if (fsElement()) entered = true;
+      else if (entered && full === "screen") setFull(null); // left via Esc or browser chrome
     };
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && exitFull();
-    // Full screen only exists on the desk; shrinking below it leaves.
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && full === "window" && exitFull();
+    // Full modes only exist on the desk; shrinking below it leaves.
     const mq = window.matchMedia(DESK_QUERY);
     const onMq = () => !mq.matches && exitFull();
     mq.addEventListener("change", onMq);
@@ -214,6 +256,64 @@ export function Lab() {
       document.body.style.overflow = "";
     };
   }, [full, exitFull]);
+
+  // ---- pop-out: the visualizer in an always-on-top window (see lib/popout)
+  useEffect(() => setPopAvail(popKind()), []);
+
+  // Safari's path needs its video already playing when the click comes.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (popAvail !== "video" || !engine || !canvas) return;
+    const v = new VideoPop(canvas, () => {
+      popRef.current = null;
+      setPopped(false);
+    });
+    videoPopRef.current = v;
+    return () => {
+      v.dispose();
+      videoPopRef.current = null;
+    };
+  }, [popAvail, engine]);
+
+  useEffect(() => () => popRef.current?.close(), []);
+
+  const togglePop = async () => {
+    const canvas = canvasRef.current;
+    const e = engineRef.current;
+    if (!canvas || !e) return;
+    if (popRef.current) return popRef.current.close();
+    try {
+      if (popAvail === "window") {
+        popRef.current = await popWindow(canvas, {
+          onOpen: (win) => {
+            popWinRef.current = win;
+            e.setFrameWindow(win);
+            audioRef.current?.setFrameWindow(win);
+          },
+          onResize: (px) => {
+            e.resize(Math.max(200, Math.min(MAX_PIXELS, px)));
+            e.redraw();
+          },
+          onDrag: (dx, dy) => e.rotateBy(dx, dy),
+          onClose: () => {
+            popRef.current = null;
+            popWinRef.current = null;
+            e.setFrameWindow(null);
+            audioRef.current?.setFrameWindow(null);
+            e.resize(measureRef.current());
+            e.redraw();
+            setPopped(false);
+          },
+        });
+      } else if (videoPopRef.current) {
+        await videoPopRef.current.open();
+        popRef.current = videoPopRef.current;
+      } else return;
+      setPopped(true);
+    } catch (err) {
+      console.warn("pop-out refused", err);
+    }
+  };
 
   // ---- rebuild whenever the genome changes
   useEffect(() => {
@@ -272,25 +372,42 @@ export function Lab() {
       <div className="lab-bar">
         {full && (
           <Link href="/" className="wordmark lab-bar-mark" onClick={exitFull}>
-            Cubic
-            <br />
-            Symmetry
-            <br />
-            Engine
+            <WordmarkText />
           </Link>
         )}
-        <span className="mono-label">Lab · drag headers to rearrange</span>
+        {full && <span className="lab-bar-title">Lab</span>}
+        <LabTips />
         <div className="lab-bar-tools">
-          <button onClick={desk.tidy} title="Open every module and re-pack the layout">
+          <button onClick={desk.tidy} title="Snap everything to a clean grid; sizes are kept">
             tidy
           </button>
-          <button className={full ? "on" : ""} onClick={full ? exitFull : enterFull}>
-            {full ? "exit full screen" : "full screen"}
+          <button className="lab-dice" onClick={desk.roll} title="Roll a random layout" aria-label="Random layout">
+            ⚄
           </button>
+          <button
+            className={full === "window" ? "on" : ""}
+            onClick={() => toggleFull("window")}
+            title="Fill the browser window with the desk"
+          >
+            {full === "window" ? "exit full window" : "full window"}
+          </button>
+          {canTrueFull && (
+            <button
+              className={full === "screen" ? "on" : ""}
+              onClick={() => toggleFull("screen")}
+              title="True full screen"
+            >
+              {full === "screen" ? "exit full screen" : "full screen"}
+            </button>
+          )}
         </div>
       </div>
 
-      <div ref={deskRef} className="lab-desk">
+      <div
+        ref={deskRef}
+        className="lab-desk"
+        style={{ "--content": `${desk.bottom}px` } as React.CSSProperties}
+      >
         {/* Docked, never floating: the form and its genotype stay top left. */}
         <div ref={dockRef} className="lab-dock">
           <div
@@ -309,7 +426,27 @@ export function Lab() {
             onPointerUp={() => (dragRef.current = null)}
             onPointerCancel={() => (dragRef.current = null)}
           >
-            <canvas ref={canvasRef} />
+            {/* The canvas's own slot: it can leave for the pop-out and come
+                back without React ever reconciling around it. */}
+            <div className="lab-canvas-slot">
+              <canvas ref={canvasRef} />
+            </div>
+            {popped && popAvail === "window" && (
+              <button className="lab-popped" onPointerDown={(ev) => ev.stopPropagation()} onClick={togglePop}>
+                ⧉ popped out · click to bring it back
+              </button>
+            )}
+            {popAvail && !(popped && popAvail === "window") && (
+              <button
+                className={`lab-popout${popped ? " on" : ""}`}
+                onPointerDown={(ev) => ev.stopPropagation()}
+                onClick={togglePop}
+                title={popped ? "Bring the visualizer back" : "Pop out: an always-on-top window you can park anywhere"}
+                aria-label="Pop out visualizer"
+              >
+                ⧉
+              </button>
+            )}
           </div>
 
           <div className="tooling">
@@ -369,8 +506,8 @@ export function Lab() {
           </div>
         </div>
 
-        <LabWindow id="sound" title="Sound" desk={desk}>
-          <div className="lab-chips">
+        <LabWindow id="sound" title="Sound" desk={desk} span={advanced ? 2 : 1} col={0}>
+          <div className="lab-chips lab-sound-src">
             <button className={audio ? "" : "on"} onClick={stopAudio}>
               off
             </button>
@@ -405,51 +542,27 @@ export function Lab() {
             audioError || "kick → pump · mids → feedback · highs → spin · hats → wobble + glitch",
           )}
           {advanced && (
-            <>
-              {SOUND_SECTIONS.filter((sec) => !detached.includes(sec.id)).map((sec) => (
-                <div className="lab-sub" key={sec.id}>
-                  <div className="lab-sub-head">
-                    <span className="mono-label">{sec.title}</span>
-                    <button
-                      className="desk-only"
-                      title="Detach into its own window"
-                      onClick={() => setDetached((d) => [...d, sec.id])}
-                    >
-                      ⇱
-                    </button>
-                  </div>
-                  <div className="lab-audio-advanced">
-                    {sec.knobs.map(([k, lo, hi, hint]) => tune(k, lo, hi, k, hint))}
-                  </div>
-                </div>
-              ))}
-              <button className="lab-sub-reset" onClick={() => setTuning(DEFAULT_TUNING)}>
-                reset sound
-              </button>
-            </>
+            <button className="lab-sub-reset" onClick={() => setTuning(DEFAULT_TUNING)}>
+              reset sound
+            </button>
           )}
         </LabWindow>
 
-        {SOUND_SECTIONS.filter((sec) => detached.includes(sec.id)).map((sec) => (
-          <LabWindow
-            key={sec.id}
-            id={`sound-${sec.id}`}
-            title={`Sound · ${sec.title}`}
-            desk={desk}
-            actions={
-              <button
-                title="Dock back into Sound"
-                onClick={() => setDetached((d) => d.filter((x) => x !== sec.id))}
-              >
-                ⇲
-              </button>
-            }
-          >
-            {sec.knobs.map(([k, lo, hi, hint]) => tune(k, lo, hi, k, hint))}
-          </LabWindow>
-        ))}
+        {/* Advanced breaks out into a window per group, beside a wider Sound. */}
+        {advanced &&
+          SOUND_SECTIONS.map((sec) => (
+            <LabWindow
+              key={sec.id}
+              id={`sound-${sec.id}`}
+              title={`Sound · ${sec.title}`}
+              desk={desk}
+              col={sec.col}
+            >
+              {sec.knobs.map(([k, lo, hi, hint]) => tune(k, lo, hi, k, hint))}
+            </LabWindow>
+          ))}
 
-        <LabWindow id="presets" title="Base · palette" desk={desk}>
+        <LabWindow id="presets" title="Base · palette" desk={desk} col={advanced ? 2 : 0}>
           <div className="mono-label">Base</div>
           <div className="lab-chips">
             {BASES.map((b) => (
@@ -534,7 +647,7 @@ export function Lab() {
           />
         </LabWindow>
 
-        <LabWindow id="chain" title={`Operator chain ${genome.ops.length}/${MAX_OPS}`} desk={desk}>
+        <LabWindow id="chain" title={`Operator chain ${genome.ops.length}/${MAX_OPS}`} desk={desk} col={advanced ? 3 : 1}>
           {genome.ops.map((op, i) => (
             <div className="lab-op" key={`${op.op}-${i}`}>
               <div className="lab-op-head">
@@ -612,7 +725,7 @@ export function Lab() {
           )}
         </LabWindow>
 
-        <LabWindow id="export" title="Export" desk={desk}>
+        <LabWindow id="export" title="Export" desk={desk} col={advanced ? 2 : 0}>
           <LabExportBar engine={engine} name={`cse-lab-${genomeKey(genome)}`} />
         </LabWindow>
       </div>

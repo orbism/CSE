@@ -24,11 +24,7 @@ export function Masthead() {
         <div>
           <Link href="/" className="wordmark">
             <h1>
-              Cubic 
-              <br />
-              Symmetry
-              <br />
-              Engine
+              <WordmarkText />
             </h1>
           </Link>
           <nav className="nav">
@@ -53,6 +49,19 @@ export function Masthead() {
       </header>
 
       <div className="ansi-rule">{RULE}</div>
+    </>
+  );
+}
+
+/** The three lines, initials picked out in the scheme's colours. */
+export function WordmarkText() {
+  return (
+    <>
+      <span className="mark-c">C</span>ubic
+      <br />
+      <span className="mark-s">S</span>ymmetry
+      <br />
+      <span className="mark-e">E</span>ngine
     </>
   );
 }

@@ -14,9 +14,13 @@ import type { LabDrive } from "@cse/art";
  *
  * ## The pump
  *
- * Kicks are found by spectral flux in the bass bins — the frame-to-frame *rise*
- * in energy, against an adaptive threshold — not by level, so a sustained bass
- * line doesn't read as one long kick. Intervals between kicks give a tempo
+ * The kick has its own signal path: a steep band-pass around `kickHz`
+ * (default 60 Hz, below most bass lines' body) into a short time-domain
+ * analyser. Its RMS is measured against a floor that follows the level between
+ * kicks, so a rolling sub doesn't hold the form open — only what rises above
+ * it pumps. The form's size follows that envelope directly, frame by frame,
+ * which is what makes a four-on-the-floor read as breathing rather than a
+ * twitch. Onsets come from the same envelope's rises. Intervals between kicks give a tempo
  * (folded into 75–150 BPM, median of the last dozen), and a flywheel keeps
  * pumping on that tempo through fills and breakdowns where the kick drops out.
  * Each beat fires a damped spring: out hard, back past rest, settle — which is
@@ -30,6 +34,8 @@ export interface AudioTuning {
   pump: number;
   /** Length of the beat pulse; lower is snappier. */
   snap: number;
+  /** Centre of the kick band, Hz. Lower isolates the kick from the bass line. */
+  kickHz: number;
   /** Squash-and-stretch on the beat. */
   squash: number;
   /** Continuous swell with the bass level, under the beats. */
@@ -50,6 +56,7 @@ export const DEFAULT_TUNING: AudioTuning = {
   sensitivity: 1,
   pump: 1,
   snap: 1,
+  kickHz: 60,
   squash: 0.6,
   breathe: 0.5,
   feedback: 1,
@@ -60,8 +67,7 @@ export const DEFAULT_TUNING: AudioTuning = {
   flash: 0,
 };
 
-/** Hz ranges: kick flux, bass level, mids level, highs level, hat flux. */
-const KICK: [number, number] = [35, 130];
+/** Hz ranges: bass level, mids level, highs level, hat flux. */
 const LEVELS: [number, number][] = [
   [20, 150],
   [250, 2000],
@@ -122,7 +128,17 @@ export class AudioDrive {
   private analyser: AnalyserNode;
   private prev: Uint8Array<ArrayBuffer>;
   private peak = [0.05, 0.05, 0.05];
-  private kick = new Onset(1.6, 0.012, 0.25);
+  private kick = new Onset(1.5, 0.08, 0.25);
+  private kickFilters: BiquadFilterNode[];
+  private kickAnalyser: AnalyserNode;
+  private kickBuf: Float32Array<ArrayBuffer>;
+  private kickHz = 0;
+  private kickPeak = 1e-4;
+  /** Normalised level between kicks; what a kick has to rise above. */
+  private kickBed = 0;
+  private kickShape = 0;
+  /** The pump envelope, 0..1. */
+  kickEnv = 0;
   private hat = new Onset(1.8, 0.01, 0.07);
   private intervals: number[] = [];
   private kickPrev = -10;
@@ -143,16 +159,44 @@ export class AudioDrive {
     // Low: flux needs the attack, the envelopes below do the smoothing.
     this.analyser.smoothingTimeConstant = 0.3;
     // Not connected to the destination: listening only, no echo.
-    ctx.createMediaStreamSource(stream).connect(this.analyser);
+    const src = ctx.createMediaStreamSource(stream);
+    src.connect(this.analyser);
+
+    // Kick path: 12 dB/oct high-pass, 24 dB/oct low-pass, then a short window.
+    this.kickFilters = (["highpass", "lowpass", "lowpass"] as BiquadFilterType[]).map((type) => {
+      const f = ctx.createBiquadFilter();
+      f.type = type;
+      f.Q.value = 0.8;
+      return f;
+    });
+    this.kickAnalyser = ctx.createAnalyser();
+    this.kickAnalyser.fftSize = 1024; // ~21 ms at 48 kHz
+    this.kickBuf = new Float32Array(this.kickAnalyser.fftSize);
+    let node: AudioNode = src;
+    for (const f of this.kickFilters) node = node.connect(f);
+    node.connect(this.kickAnalyser);
     this.bins = new Uint8Array(this.analyser.frequencyBinCount);
     this.prev = new Uint8Array(this.bins.length);
     this.binHz = ctx.sampleRate / this.analyser.fftSize;
     for (const t of stream.getAudioTracks()) t.addEventListener("ended", onEnded);
+    this.schedule();
+  }
+
+  /** Frames come from `host` — the pop-out window while there is one, since a hidden tab gets none. */
+  private host: Window = window;
+
+  private schedule() {
     const loop = () => {
       this.analyse(performance.now() / 1000);
-      this.raf = requestAnimationFrame(loop);
+      this.raf = this.host.requestAnimationFrame(loop);
     };
-    this.raf = requestAnimationFrame(loop);
+    this.raf = this.host.requestAnimationFrame(loop);
+  }
+
+  setFrameWindow(win: Window | null) {
+    this.host.cancelAnimationFrame(this.raf);
+    this.host = win ?? window;
+    this.schedule();
   }
 
   static async open(source: AudioSource, onEnded: () => void): Promise<AudioDrive> {
@@ -212,9 +256,33 @@ export class AudioDrive {
       this.level[b] += (n - this.level[b]) * (n > this.level[b] ? 0.6 : 0.12);
     }
 
+    const T = this.tuning;
+    const dt = Math.min(0.1, this.lastT ? t - this.lastT : 0.016);
+    this.lastT = t;
+
+    // ---- kick path
+    if (T.kickHz !== this.kickHz) {
+      this.kickHz = T.kickHz;
+      const [hp, lp1, lp2] = this.kickFilters;
+      hp.frequency.value = T.kickHz * 0.6;
+      lp1.frequency.value = lp2.frequency.value = T.kickHz * 1.6;
+    }
+    this.kickAnalyser.getFloatTimeDomainData(this.kickBuf);
+    let sq = 0;
+    for (const v of this.kickBuf) sq += v * v;
+    const rms = Math.sqrt(sq / this.kickBuf.length);
+    this.kickPeak = Math.max(rms, this.kickPeak * 0.998, 1e-4);
+    const n = rms / this.kickPeak;
+    // The bed drops fast and rises slowly, so it settles on the between-kick level.
+    this.kickBed += (n - this.kickBed) * (n < this.kickBed ? 0.3 : 0.01);
+    const shape = clamp((n - this.kickBed) / (1 - this.kickBed + 1e-3), 0, 1);
+    const rise = Math.max(0, shape - this.kickShape);
+    this.kickShape = shape;
+    this.kickEnv = Math.max(shape, this.kickEnv * Math.exp(-dt / (0.07 * T.snap)));
+
     const period = this.bpm ? 60 / this.bpm : 0;
 
-    if (this.kick.hit(this.flux(KICK), t) && this.level[0] > 0.35) {
+    if (this.kick.hit(rise, t) && shape > 0.45) {
       const since = t - this.kickPrev;
       if (since < 2) {
         let ivl = since;
@@ -231,7 +299,7 @@ export class AudioDrive {
       // A real kick just after a flywheel beat only corrects it; restarting the
       // spring there would stutter.
       if (t - this.lastBeat > 0.1) this.lastBeat = t;
-      this.strength = clamp(this.level[0], 0.4, 1);
+      this.strength = clamp(shape, 0.4, 1);
     } else if (period && t - this.lastBeat > period * 1.08 && t - this.kickPrev < 4) {
       // Flywheel: the kick dropped out but the track hasn't — keep the pump on tempo.
       this.lastBeat = t;
@@ -246,7 +314,6 @@ export class AudioDrive {
       this.hatSign = -this.hatSign;
     }
 
-    const T = this.tuning;
     const s = T.sensitivity;
     const since = t - this.lastBeat;
     const tau = 0.09 * T.snap;
@@ -259,7 +326,8 @@ export class AudioDrive {
     const [bass, mids, highs] = this.level;
 
     const target: LabDrive = {
-      pulse: s * (T.pump * 0.24 * b + T.breathe * 0.08 * bass),
+      // the kick envelope sizes the form; the spring adds the contraction after
+      pulse: s * (T.pump * (0.2 * this.kickEnv + 0.08 * Math.min(0, b)) + T.breathe * 0.08 * bass),
       squash: s * T.squash * 0.12 * b,
       feedback: s * T.feedback * (0.5 * mids + 0.25 * up),
       spin: s * (T.spin * 1.2 * highs + T.whip * 3 * whip),
@@ -267,8 +335,6 @@ export class AudioDrive {
       glitch: clamp(s * T.glitch * (0.8 * hat + 0.4 * up), 0, 1),
       flash: clamp(s * T.flash * up * up, 0, 1),
     };
-    const dt = Math.min(0.1, this.lastT ? t - this.lastT : 0.016);
-    this.lastT = t;
     const next = { ...this.out };
     for (const k of Object.keys(EASE) as (keyof LabDrive)[]) {
       next[k] += (target[k] - next[k]) * (1 - Math.exp(-dt / EASE[k]));
@@ -277,7 +343,7 @@ export class AudioDrive {
   }
 
   close() {
-    cancelAnimationFrame(this.raf);
+    this.host.cancelAnimationFrame(this.raf);
     this.stream.getTracks().forEach((t) => t.stop());
     this.ctx.close();
   }

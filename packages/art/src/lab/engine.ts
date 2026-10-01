@@ -98,6 +98,11 @@ export class LabEngine {
   private spinPhase = 0;
   /** Glitch tears persist across frames and slide back as the level decays. */
   private tears: { y: number; h: number; dir: number }[] = [];
+  /**
+   * Window whose frames drive the loop. A hidden tab gets no animation
+   * frames, so while the canvas lives in a pop-out, that window's clock runs it.
+   */
+  private host: Window | null = null;
   private tearLevel = 0;
 
   constructor(options: LabEngineOptions) {
@@ -275,15 +280,24 @@ export class LabEngine {
       }
       last = now;
       this.drawFrame(this.elapsed + (now - this.t0) / 1000);
-      this.raf = requestAnimationFrame(tick);
+      this.raf = frames.requestAnimationFrame(tick);
     };
-    this.raf = requestAnimationFrame(tick);
+    const frames = this.host ?? window;
+    this.raf = frames.requestAnimationFrame(tick);
+  }
+
+  /** Run the loop on another window's frames (a pop-out), or back on this one with null. */
+  setFrameWindow(win: Window | null) {
+    const was = this.running;
+    this.stop();
+    this.host = win;
+    if (was) this.start();
   }
 
   stop() {
     if (!this.raf) return;
     this.elapsed += (performance.now() - this.t0) / 1000;
-    cancelAnimationFrame(this.raf);
+    (this.host ?? window).cancelAnimationFrame(this.raf);
     this.raf = 0;
     // Stills and exports are taken stopped; they should show the genome, not a beat.
     this.live = NEUTRAL;
@@ -336,6 +350,22 @@ export class LabEngine {
    * `primeLoop`, which is what makes that still close.
    */
   captureLoopPixels(size: number, turn: number, _hud = false): ImageData {
+    return this.loopFrame(size, turn, () => this.ctx.getImageData(0, 0, size, size));
+  }
+
+  /** Same frame as an encoded image, for the MP4 path. */
+  captureLoopFrame(
+    size: number,
+    turn: number,
+    _hud = false,
+    type: "image/png" | "image/jpeg" = "image/png",
+    quality = 0.94,
+  ): string {
+    return this.loopFrame(size, turn, () => this.options.canvas.toDataURL(type, quality));
+  }
+
+  /** Paint the loop frame at `turn` (may exceed 1 for multi-loop exports), then read it out. */
+  private loopFrame<T>(size: number, turn: number, read: () => T): T {
     const piece = this.piece;
     if (!piece) throw new Error("nothing loaded");
     const previous = this.options.size;
@@ -345,9 +375,9 @@ export class LabEngine {
     this.applyFeedback();
     this.lastFrame = piece.pass.sample(this.gl, piece.scene, piece.camera);
     piece.pass.paint(this.ctx, size, piece.palette);
-    const data = this.ctx.getImageData(0, 0, size, size);
+    const out = read();
     this.resize(previous);
-    return data;
+    return out;
   }
 
   dispose() {

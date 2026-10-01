@@ -49,6 +49,17 @@
   --well: #070909;
   --glow: 0 0 0 transparent;
   --halo: 0 0 0 transparent;
+  /* Second and third hues. Only prism makes them distinct; elsewhere they
+     fall back to the dim ink, so the meters read the same as before. */
+  --accent-2: var(--ink-dim);
+  --accent-3: var(--ink-dim);
+  /* The wordmark's initials. One hue unless a scheme has three. */
+  --mark-c: var(--accent);
+  --mark-s: var(--accent);
+  --mark-e: var(--accent);
+  /* The switch icon's three segments. */
+  --icon-b: var(--ink);
+  --icon-c: var(--panel);
 
   --display: "Departure Mono", "JetBrains Mono", ui-monospace, monospace;
   --body: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -109,6 +120,77 @@
     inset 0 0 22px color-mix(in srgb, var(--accent) 4%, transparent);
 }
 
+/* Glowing like bloom, but hot: rose-red embers on near-black. */
+[data-theme="ember"] {
+  --bg: #100a0a;
+  --panel: #1f1616;
+  --line: #3b2323;
+  --line-bright: #53393a;
+  --ink: #ecd8d4;
+  --ink-dim: #c49a93;
+  --ink-faint: #dfbdb6;
+  --ink-bright: #fff1ee;
+  --accent: #ff6b5e;
+  --accent-dim: #8e3129;
+  --warn: #ffb347;
+  --on-accent: #1c0604;
+  --well: #0b0707;
+  --glow: 0 0 6px color-mix(in srgb, var(--accent) 75%, transparent),
+    0 0 20px color-mix(in srgb, var(--accent) 38%, transparent);
+  --halo: 0 0 30px color-mix(in srgb, var(--accent) 11%, transparent),
+    inset 0 0 22px color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+/* Multicolour: three hues share the work. */
+[data-theme="prism"] {
+  --bg: #0a0a0e;
+  --panel: #16161d;
+  --line: #262638;
+  --line-bright: #3d3d52;
+  --ink: #dcdce8;
+  --ink-dim: #a3a3bd;
+  --ink-faint: #c4c4da;
+  --ink-bright: #f6f6ff;
+  --accent: #5ef2c2;
+  --accent-2: #ff6fb5;
+  --accent-3: #ffd35c;
+  --accent-dim: #25765d;
+  --warn: #ff9f5c;
+  --on-accent: #03140e;
+  --well: #07070a;
+  --icon-b: var(--accent-2);
+  --icon-c: var(--accent-3);
+  --mark-s: var(--accent-2);
+  --mark-e: var(--accent-3);
+}
+
+html[data-theme="prism"] :is(h1, .doc h2) {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2) 55%, var(--accent-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+html[data-theme="prism"] .doc h2 {
+  border-image: linear-gradient(90deg, var(--accent), var(--accent-2), var(--accent-3)) 1;
+}
+
+html[data-theme="prism"] .lab-win:nth-of-type(3n + 2) .lab-win-head .mono-label {
+  color: var(--accent-2);
+}
+
+html[data-theme="prism"] .lab-win:nth-of-type(3n) .lab-win-head .mono-label {
+  color: var(--accent-3);
+}
+
+html[data-theme="prism"] .nav span:nth-child(3n + 2) a.on {
+  color: var(--accent-2);
+}
+
+html[data-theme="prism"] .nav span:nth-child(3n) a.on {
+  color: var(--accent-3);
+}
+
 html[data-theme="bloom"] body {
   background:
     radial-gradient(ellipse 80% 50% at 50% -10%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 70%),
@@ -116,16 +198,16 @@ html[data-theme="bloom"] body {
   background-attachment: fixed;
 }
 
-html[data-theme="bloom"] :is(h1, h2, h3, .nav a.on, button.on, .lab-chips button.on, a:hover, .lab-genotype) {
+html:is([data-theme="bloom"], [data-theme="ember"]) :is(h1, h2, h3, .nav a.on, button.on, .lab-chips button.on, a:hover, .lab-genotype) {
   text-shadow: var(--glow);
 }
 
-html[data-theme="bloom"] :is(.panel, .lab-win, .lab-dock, .art-frame) {
+html:is([data-theme="bloom"], [data-theme="ember"]) :is(.panel, .lab-win, .lab-dock, .art-frame) {
   box-shadow: var(--halo);
 }
 
-html[data-theme="bloom"] button:hover:not(:disabled),
-html[data-theme="bloom"] button.primary {
+html:is([data-theme="bloom"], [data-theme="ember"]) button:hover:not(:disabled),
+html:is([data-theme="bloom"], [data-theme="ember"]) button.primary {
   box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 22%, transparent);
 }
 
@@ -818,6 +900,63 @@ input::placeholder {
   padding: 8px 0;
 }
 
+/* Matches the three-line wordmark's height: 3 × 12px × 1.05 line-height. */
+.lab-bar-title {
+  font-family: var(--display);
+  font-size: 38px;
+  line-height: 1;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-shadow: var(--glow);
+  transition: color 0.6s;
+}
+
+/* The page's own "Lab" heading follows suit. */
+.doc.lab-page > h2 {
+  color: var(--accent);
+  transition: color 0.6s;
+}
+
+html[data-theme="prism"] .lab-bar-title {
+  background: linear-gradient(90deg, var(--accent), var(--accent-2) 55%, var(--accent-3));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* Tips sit dead centre of the bar, whatever is either side of them. */
+.lab-bar {
+  position: relative;
+}
+
+.lab-tip {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  max-width: 44%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: center;
+  pointer-events: none;
+  animation: tip-in 0.6s ease-out;
+}
+
+@keyframes tip-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 4px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lab-tip {
+    animation: none;
+  }
+}
+
 .lab-bar-tools {
   margin-left: auto;
   display: flex;
@@ -827,6 +966,12 @@ input::placeholder {
 .lab-bar-tools button {
   font-size: 11px;
   padding: 6px 11px;
+}
+
+.lab-bar-tools .lab-dice {
+  font-size: 22px;
+  line-height: 1;
+  padding: 2px 9px 4px;
 }
 
 .lab-bar-mark {
@@ -858,6 +1003,48 @@ input::placeholder {
   cursor: grabbing;
 }
 
+.lab-canvas {
+  position: relative;
+}
+
+.lab-canvas-slot {
+  width: 100%;
+  height: 100%;
+}
+
+/* Pop-out: big enough to find on a busy canvas, quiet until wanted. */
+.lab-popout {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 2;
+  width: 46px;
+  height: 46px;
+  padding: 0;
+  font-size: 26px;
+  line-height: 1;
+  text-transform: none;
+  letter-spacing: 0;
+  background: color-mix(in srgb, var(--bg) 70%, transparent);
+  opacity: 0.7;
+  transition: opacity 0.15s, background 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.lab-popout:hover,
+.lab-popout.on {
+  opacity: 1;
+}
+
+.lab-popped {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--ink-dim);
+  font-size: 13px;
+  text-shadow: var(--glow);
+}
+
 .lab-canvas canvas {
   display: block;
   width: 100%;
@@ -881,7 +1068,7 @@ input::placeholder {
 
 .lab-win-head .mono-label {
   flex: 1;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .lab-win-grip {
@@ -899,8 +1086,9 @@ input::placeholder {
   font-size: 15px;
 }
 
+/* Vertical padding + borders = CHROME_Y in LabDesk; keep them in step. */
 .lab-win-body {
-  padding: 8px 10px 10px;
+  padding: 10px 12px 12px;
   scrollbar-width: thin;
   scrollbar-color: var(--line-bright) var(--bg);
 }
@@ -934,22 +1122,16 @@ input::placeholder {
 
 /* ── lab: desk (iPad and desktop) — a grid of windows that never overlap ── */
 
-.desk-only {
-  display: none;
-}
-
 @media (min-width: 768px) and (min-height: 600px) {
   .lab-bar {
     display: flex;
   }
 
-  .desk-only {
-    display: revert;
-  }
-
+  /* On the page the desk is at least a screen tall and grows to whatever the
+     packed windows need (--content, from LabDesk); the page scrolls. */
   .lab-desk {
     position: relative;
-    height: calc(100dvh - 60px);
+    height: max(calc(100dvh - 60px), var(--content, 0px));
     min-height: 560px;
     /* size container: the dock sizes itself off the desk */
     container-type: size;
@@ -1001,20 +1183,25 @@ input::placeholder {
     top: var(--y);
     margin: 0;
     width: var(--w, 280px);
-    height: var(--h);
+    height: var(--h, auto);
     display: flex;
     flex-direction: column;
+    font-size: 14px;
     transition:
-      left 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
-      top 0.28s cubic-bezier(0.2, 0.8, 0.2, 1),
-      height 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+      left 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+      top 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+      width 0.3s cubic-bezier(0.2, 0.8, 0.2, 1),
+      height 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
   }
 
-  .lab-win:not(.placed) {
-    visibility: hidden;
-    transition: none;
+  /* Resizing tracks the pointer; easing would lag it. */
+  .lab-win.resizing {
+    transition: left 0.3s, top 0.3s;
+    border-color: var(--accent-dim);
   }
 
+  /* Shorter than its content: the body scrolls, the header stays. */
+  /* Overrides the phone view's collapsed-until-tapped. */
   .lab-win-body,
   .lab-win:not(.open) .lab-win-body {
     display: block;
@@ -1022,6 +1209,57 @@ input::placeholder {
     min-height: 0;
     overflow-y: auto;
     overscroll-behavior: contain;
+  }
+
+  /* Two columns wide: the content flows into two columns. */
+  .lab-win[data-span="2"] .lab-win-inner {
+    columns: 2;
+    column-gap: 16px;
+  }
+
+  .lab-win[data-span="2"] .lab-win-inner > * {
+    break-inside: avoid;
+  }
+
+  /* ...except what reads as one strip: source buttons and the meter. */
+  .lab-win[data-span="2"] .lab-win-inner > :is(.lab-sound-src, .audio-meter) {
+    column-span: all;
+  }
+
+  .lab-win-resize {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    width: 22px;
+    height: 22px;
+    cursor: nwse-resize;
+    touch-action: none;
+    z-index: 2;
+    background: linear-gradient(
+      135deg,
+      transparent 55%,
+      var(--line-bright) 55% 62%,
+      transparent 62% 72%,
+      var(--line-bright) 72% 79%,
+      transparent 79%
+    );
+  }
+
+  .lab-win-resize:hover,
+  .lab-win.resizing .lab-win-resize {
+    background: linear-gradient(
+      135deg,
+      transparent 55%,
+      var(--accent) 55% 62%,
+      transparent 62% 72%,
+      var(--accent) 72% 79%,
+      transparent 79%
+    );
+  }
+
+  .lab-win:not(.placed) {
+    visibility: hidden;
+    transition: none;
   }
 
   .lab-win:not(.open) .lab-win-head {
@@ -1043,7 +1281,7 @@ input::placeholder {
 
   .lab-win.dragging {
     z-index: 50;
-    transition: height 0.28s;
+    transition: width 0.3s;
     border-color: var(--accent-dim);
     box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55), var(--halo);
     opacity: 0.94;
@@ -1066,21 +1304,25 @@ input::placeholder {
     display: none;
   }
 
-  /* tighter inside windows: the point of the desk is that nothing scrolls */
   .lab-win .lab-slider {
-    margin: 3px 0 5px;
+    margin: 4px 0 7px;
   }
 
   .lab-win .lab-slider label {
-    font-size: 10.5px;
+    font-size: 11.5px;
   }
 
   .lab-win .lab-hint {
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .lab-win .lab-chips {
-    margin-top: 4px;
+    margin-top: 5px;
+  }
+
+  .lab-win .lab-chips button {
+    font-size: 11.5px;
+    padding: 5px 10px;
   }
 
   .lab-win .lab-op {
@@ -1100,10 +1342,14 @@ input::placeholder {
     flex-direction: column;
   }
 
+  /* Full modes fit by adding columns; if even the narrowest can't, the desk
+     scrolls rather than the page. */
   .lab-full .lab-desk {
     flex: 1;
     height: auto;
     min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
   }
 
   /* When the element itself is full screen, body::after's scanlines are left
@@ -2368,18 +2614,7 @@ footer {
 }
 
 .audio-meter.advanced {
-  height: 96px;
-}
-
-.lab-audio-advanced {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
-  column-gap: 16px;
-  align-items: start;
-}
-
-.lab-audio-advanced .lab-slider {
-  margin: 4px 0;
+  height: 120px;
 }
 
 /* ── theme switch ───────────────────────────────────────────────────────── */
@@ -2392,18 +2627,41 @@ footer {
   place-items: center;
 }
 
-/* Split circle in the scheme's own colours: accent, ink, panel. */
+/* Registered so the icon's colours can cross-fade: an unregistered custom
+   property is a string and would snap. */
+@property --dot-a {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --dot-b {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+@property --dot-c {
+  syntax: "<color>";
+  inherits: false;
+  initial-value: transparent;
+}
+
+/* Split circle in the scheme's own colours. Each click turns it a sixth
+   (see ThemeSwitch) while the colours fade to the next scheme. */
 .theme-dot {
+  --dot-a: var(--accent);
+  --dot-b: var(--icon-b);
+  --dot-c: var(--icon-c);
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: conic-gradient(var(--accent) 0 50%, var(--ink) 50% 62%, var(--panel) 62% 100%);
+  background: conic-gradient(var(--dot-a) 0 50%, var(--dot-b) 50% 62%, var(--dot-c) 62% 100%);
   box-shadow: 0 0 0 1px var(--line-bright), var(--glow);
-  transition: transform 0.2s;
-}
-
-.theme-switch:hover .theme-dot {
-  transform: rotate(90deg);
+  transition:
+    transform 0.6s cubic-bezier(0.3, 1.3, 0.5, 1),
+    --dot-a 0.6s,
+    --dot-b 0.6s,
+    --dot-c 0.6s,
+    box-shadow 0.6s;
 }
 
 .masthead-tools {
@@ -2421,34 +2679,42 @@ footer {
   white-space: nowrap;
 }
 
-.lab-win-actions button {
-  border: 0;
-  border-left: 1px solid var(--line);
-  height: 36px;
-  width: 36px;
-  padding: 0;
-  font-size: 13px;
-}
-
-.lab-sub {
-  border-top: 1px solid var(--line);
-  margin-top: 8px;
-  padding-top: 6px;
-}
-
-.lab-sub-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.lab-sub-head button {
-  font-size: 12px;
-  padding: 2px 8px;
-}
-
 .lab-sub-reset {
   margin-top: 8px;
   font-size: 10.5px;
   padding: 4px 10px;
+}
+
+/* Sound's input choices: the controls you reach for first, so full-size. */
+.lab-chips.lab-sound-src {
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.lab-chips.lab-sound-src button,
+.lab-win .lab-chips.lab-sound-src button {
+  flex: 1 1 auto;
+  font-size: 12.5px;
+  padding: 9px 12px;
+}
+
+/* ── wordmark initials ──────────────────────────────────────────────────── */
+
+.mark-c,
+.mark-s,
+.mark-e {
+  text-shadow: var(--glow);
+  transition: color 0.6s;
+}
+
+.mark-c {
+  color: var(--mark-c);
+}
+
+.mark-s {
+  color: var(--mark-s);
+}
+
+.mark-e {
+  color: var(--mark-e);
 }

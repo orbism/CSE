@@ -1,6 +1,5 @@
 "use client";
 
-import type { Engine } from "@cse/art";
 
 /**
  * Exporters for a Form: still PNG, looping GIF, looping MP4.
@@ -53,6 +52,8 @@ export interface LoopOptions {
   size: number;
   /** Bake the readout callouts into the pixels. */
   hud: boolean;
+  /** Revolutions in the file (MP4). One by default. */
+  loops?: number;
 }
 
 export type LoopSpec = Pick<LoopOptions, "fps" | "seconds" | "size">;
@@ -167,6 +168,15 @@ export interface StillSource {
 export interface LoopSource {
   captureLoopPixels(size: number, turn: number, hud?: boolean): ImageData;
 }
+export interface LoopFrameSource {
+  captureLoopFrame(
+    size: number,
+    turn: number,
+    hud?: boolean,
+    type?: "image/png" | "image/jpeg",
+    quality?: number,
+  ): string;
+}
 
 export async function exportPng(engine: StillSource, name: string, hud = false, size = PNG_SIZE) {
   const url = engine.capture(size, 0, hud);
@@ -247,20 +257,21 @@ async function loadFfmpeg(onProgress?: Progress) {
 }
 
 export async function exportMp4(
-  engine: Engine,
+  engine: LoopFrameSource,
   name: string,
   opts: LoopOptions,
   onProgress?: Progress,
 ) {
   const ffmpeg = await loadFfmpeg(onProgress);
-  const total = frameCount(opts);
+  const perLoop = frameCount(opts);
+  const total = perLoop * (opts.loops ?? 1);
 
   for (let i = 0; i < total; i++) {
     // JPEG, not PNG: every frame sits in the wasm filesystem until the encode
     // runs, and at 2K a PNG sequence is gigabytes. The output is lossy H.264
     // either way, so the intermediate does not need to be lossless.
     const bytes = dataUrlToBytes(
-      engine.captureLoopFrame(opts.size, i / total, opts.hud, "image/jpeg", 0.94),
+      engine.captureLoopFrame(opts.size, i / perLoop, opts.hud, "image/jpeg", 0.94),
     );
     await ffmpeg.writeFile(`f${String(i).padStart(4, "0")}.jpg`, bytes);
     onProgress?.("rendering", i + 1, total);

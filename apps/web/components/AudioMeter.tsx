@@ -9,7 +9,7 @@ const HI_HZ = 16000;
 
 /** Output meters in advanced view, with the rough value each reads full at. */
 const OUTPUTS: [keyof LabDrive, string, number][] = [
-  ["pulse", "pump", 0.3],
+  ["pulse", "pump", 0.2],
   ["squash", "squash", 0.12],
   ["feedback", "fdbk", 1],
   ["spin", "spin", 4],
@@ -39,6 +39,8 @@ export function AudioMeter({ drive, advanced }: { drive: AudioDrive | null; adva
     const draw = () => {
       const accent = css.getPropertyValue("--accent").trim();
       const dim = css.getPropertyValue("--ink-dim").trim();
+      const mid = css.getPropertyValue("--accent-2").trim();
+      const high = css.getPropertyValue("--accent-3").trim();
       const line = css.getPropertyValue("--line").trim();
       const dpr = window.devicePixelRatio || 1;
       const w = Math.round(canvas.clientWidth * dpr);
@@ -69,7 +71,7 @@ export function AudioMeter({ drive, advanced }: { drive: AudioDrive | null; adva
           v /= 255;
         }
         const bh = Math.max(dpr, v * specH);
-        ctx.fillStyle = i / bars < 0.35 ? accent : dim;
+        ctx.fillStyle = i / bars < 0.35 ? accent : i / bars < 0.7 ? mid : high;
         ctx.fillRect(i * bw + dpr, specH - bh, bw - dpr * 2, bh);
         if (advanced) {
           peaks[i] = Math.max(v, peaks[i] - 0.012);

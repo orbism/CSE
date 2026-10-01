@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 
-export const THEMES = ["phosphor", "amber", "cobalt", "bloom"] as const;
+export const THEMES = ["phosphor", "amber", "cobalt", "bloom", "ember", "prism"] as const;
 export const THEME_KEY = "cse-theme";
 
 /**
@@ -16,17 +16,22 @@ export const THEME_BOOT = `try{var t=localStorage.getItem("${THEME_KEY}");if(${J
 /**
  * Square switch; each click moves to the next scheme. The dot inherits the
  * live scheme's colours from <html>, so it is always the current scheme's icon
- * with no state needed to draw it.
+ * with no state needed to draw it; CSS fades those colours while the dot turns
+ * a sixth per click. `turns` only ever grows, so it always turns forward.
  */
 export function ThemeSwitch() {
   const [theme, setTheme] = useState<string>(THEMES[0]);
+  const [turns, setTurns] = useState(0);
 
   useEffect(() => {
-    setTheme(document.documentElement.dataset.theme ?? THEMES[0]);
+    const t = document.documentElement.dataset.theme ?? THEMES[0];
+    setTheme(t);
+    setTurns(Math.max(0, THEMES.indexOf(t as (typeof THEMES)[number])));
   }, []);
 
   const next = () => {
     const t = THEMES[(THEMES.indexOf(theme as (typeof THEMES)[number]) + 1) % THEMES.length];
+    setTurns((n) => n + 1);
     document.documentElement.dataset.theme = t;
     try {
       localStorage.setItem(THEME_KEY, t);
@@ -38,7 +43,7 @@ export function ThemeSwitch() {
 
   return (
     <button className="theme-switch" onClick={next} title={`Scheme: ${theme} — click for next`}>
-      <span className="theme-dot" aria-hidden />
+      <span className="theme-dot" style={{ transform: `rotate(${turns * 60}deg)` }} aria-hidden />
       <span className="sr-only">Colour scheme: {theme}</span>
     </button>
   );
