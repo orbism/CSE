@@ -155,7 +155,7 @@ export function describeTxError(error: unknown): FriendlyError {
   const text = links
     .flatMap((l) => [l.shortMessage, l.details, l.message])
     .filter(Boolean)
-    .join(" — ");
+    .join(" · ");
 
   for (const [pattern, friendly] of PATTERNS) {
     if (pattern.test(text)) return friendly;

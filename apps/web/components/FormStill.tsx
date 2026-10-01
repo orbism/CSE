@@ -20,9 +20,9 @@ const TAXONOMY: Record<string, { delta: string; roots: string }> = {
  * A documentation still on the art page, enlargeable.
  *
  * Stills rather than live canvases: one WebGL context per form on a single page
- * would exhaust the browser's limit and stall the scroll. At 96px a form reads
- * as a silhouette and little else, so clicking opens the same PNG at full size —
- * no second asset, no renderer.
+ * would exhaust the browser's limit and stall the scroll. As a grid tile a
+ * form reads as a silhouette and little else, so clicking opens the same PNG at
+ * full size — no second asset, no renderer.
  */
 export function FormStill({ name, cls }: { name: string; cls: string }) {
   const [open, setOpen] = useState(false);
@@ -46,12 +46,12 @@ export function FormStill({ name, cls }: { name: string; cls: string }) {
       <img
         className="form-still"
         src={src}
-        alt={`${name} — a rendered example`}
+        alt={`${name}, a rendered example`}
         width={420}
         height={420}
         loading="lazy"
         onClick={() => setOpen(true)}
-        title={`${name} — click to enlarge`}
+        title={`${name} · click to enlarge`}
       />
 
       {open && (
@@ -59,7 +59,7 @@ export function FormStill({ name, cls }: { name: string; cls: string }) {
         <div className="lightbox" onClick={() => setOpen(false)}>
           <figure onClick={() => setOpen(false)}>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt={`${name} — a rendered example`} width={420} height={420} />
+            <img src={src} alt={`${name}, a rendered example`} width={420} height={420} />
             <figcaption>
               <span className="lb-name">{name}</span>
               <span className="lb-tax">

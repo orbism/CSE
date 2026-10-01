@@ -1,9 +1,20 @@
 import { Suspense } from "react";
 import { Gallery } from "@/components/Gallery";
+import { IS_DEMO } from "@/lib/config";
 
-export const metadata = { title: "Cubic Symmetry Engine — output" };
+export const metadata = { title: "Cubic Symmetry Engine · output" };
 
 export default function OutputPage() {
+  if (IS_DEMO) {
+    return (
+      <div className="prose closed-note">
+        <h2>Output</h2>
+        <p className="mono-label">closed till post mint</p>
+        <p>Nothing out yet. Every Form lands here once it&rsquo;s minted.</p>
+      </div>
+    );
+  }
+
   return (
     <>
       <div className="prose" style={{ padding: "24px 0 8px" }}>

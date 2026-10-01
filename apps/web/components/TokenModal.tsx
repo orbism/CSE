@@ -167,7 +167,7 @@ export function TokenModal({
               Feedback: summary.traits.feedbackBand,
               Phase: `ω${summary.traits.phase}`,
               Palette: summary.traits.palette,
-              "Rarity Rank": row.rarityRank ? `#${row.rarityRank} / ${COLLECTION.supply}` : "—",
+              "Rarity Rank": row.rarityRank ? `#${row.rarityRank} / ${COLLECTION.supply}` : "-",
             }).map(([k, v]) => (
               <div className="trait-row" key={k}>
                 <span>{k}</span>

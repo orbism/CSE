@@ -12,6 +12,13 @@ export const anvil = defineChain({
   // The owner-lookup fallback batches at the JSON-RPC layer instead.
 });
 
+/**
+ * DEMO: no contract. Minting is off, the mint panel reads CLOSED, the gallery
+ * is closed until after the mint, and nothing reads the chain. LIVE is the
+ * real thing and the default.
+ */
+export const IS_DEMO = process.env.MODE === "DEMO";
+
 export const CHAIN_ID = Number(process.env.NEXT_PUBLIC_CHAIN_ID ?? 31337);
 export const CONTRACT_ADDRESS = (process.env.NEXT_PUBLIC_CONTRACT_ADDRESS ??
   "0x0000000000000000000000000000000000000000") as `0x${string}`;

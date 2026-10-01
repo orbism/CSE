@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { ARCHETYPES } from "@cse/core";
 import { MathDemo, type DemoSample } from "@/components/MathDemo";
 import { ProvenanceCheck } from "@/components/ProvenanceCheck";
@@ -23,7 +24,7 @@ const TRIO_ROOTS: DemoSample[] = [
   { label: "Near-degenerate", roots: [1, 1.05, -2], branch: 2 },
 ];
 
-export const metadata = { title: "Cubic Symmetry Engine — math" };
+export const metadata = { title: "Cubic Symmetry Engine · math" };
 
 const ARTICLE = "https://hidden-phenomena.com/articles/cubic";
 const TWEET = "https://x.com/VitalikButerin/status/2081776660941029636";
@@ -33,13 +34,13 @@ const FAMILIES: { cls: string; share: string; rule: string; forms: string[] }[] 
   {
     cls: "Separated",
     share: "Δ > 0 · ~36%",
-    rule: "three distinct real roots — bodies sit apart on the real axis",
+    rule: "three distinct real roots, bodies sit apart on the real axis",
     forms: ["Grid", "Lattice", "Tessellation", "Tower", "Strata", "Labyrinth", "Fold", "Prism"],
   },
   {
     cls: "Fractured",
     share: "Δ < 0 · ~55%",
-    rule: "one real root and a complex conjugate pair — the form breaks open",
+    rule: "one real root and a complex conjugate pair, the form breaks open",
     forms: [
       "Knot",
       "Exploded",
@@ -56,64 +57,62 @@ const FAMILIES: { cls: string; share: string; rule: string; forms: string[] }[] 
   {
     cls: "Merged",
     share: "Δ ≈ 0 · ~9%",
-    rule: "a repeated root — bodies collapse into one another",
+    rule: "a repeated root, bodies collapse into each other",
     forms: ["Void", "Radial", "Vessel", "Aperture"],
   },
 ];
 
 const DRIVERS = [
-  ["a", "global scale and framing", "|a| decides how tightly the camera fits the Form"],
-  ["b", "glyph-grid density", "80–200 cells per side, so |b| sets how fine the character grid is"],
-  ["c", "curvature", "bends, twists and opens primitives; also picks the archetype quartile"],
-  ["a/3", "world translation", "the depression's own shift, applied relative to the Form's size"],
-  ["Δ", "fracture magnitude", "log-compressed, drives how far apart the discriminant operator pushes"],
-  ["arg(A)", "palette", "the resolvent's argument selects the ANSI ramp"],
-  ["branch", "phase", "which cube root of A³ is adopted — rotates the ω-triad by a third of a turn"],
+  ["a", "global scale and framing", "|a| sets how tight the camera fits"],
+  ["b", "glyph grid density", "80 to 200 cells a side, |b| sets how fine"],
+  ["c", "curvature", "bends, twists and opens primitives, also picks the archetype quartile"],
+  ["a/3", "world translation", "the depression's own shift, relative to the Form's size"],
+  ["Δ", "fracture magnitude", "log-compressed, sets how hard the discriminant operator pushes things apart"],
+  ["arg(A)", "palette", "the resolvent's argument picks the ANSI ramp"],
+  ["branch", "phase", "which cube root of A³ gets used, turns the ω-triad a third"],
   ["roots", "body placement", "α, β, γ as points in ℂ, normalised to the unit disc"],
-  [
-    "max |root|",
-    "energy",
-    "how far the roots sit from the origin — the scale the unit-disc normalisation throws away",
-  ],
-  [
-    "min |αᵢ−αⱼ|",
-    "feedback",
-    "how close the nearest pair of roots is; drives how strongly the render feeds back on itself",
-  ],
+  ["max |root|", "energy", "how far out the roots sit, the scale the unit-disc normalisation throws away"],
+  ["min |αᵢ−αⱼ|", "feedback", "how close the nearest two roots are, sets how hard the render feeds back on itself"],
 ];
 
 export default function MathPage() {
   return (
     <div className="doc">
       <h2>
-        How a cubic becomes a shape <br/>
-        <span className="aka">AKA</span><br/>
+        How a cubic becomes a shape
+        <br />
+        <span className="aka">AKA</span>
+        <br />
         How a genotype is constructed
-
       </h2>
 
       <p className="lede">
-        There are no texture or model files. Every vertex is computed at load time from the <strong>Form&rsquo;s</strong> seed. Following is a breakdown of the whole chain, and an account of where the mathematics stops and the design begins.
+        No textures, no model files. Every vertex gets computed at load from the{" "}
+        <strong>Form&rsquo;s</strong> seed. Here&rsquo;s the whole chain, and where the math
+        stops and I start. Heads up, it&rsquo;s pretty technical. Not your thing? Skip
+        straight to the <Link href="/lab">lab</Link> and break stuff.
       </p>
 
       <section>
         <h3>1 · The solution</h3>
         <p>
-          First: <code>x³ + ax² + bx + c</code>. Substituting <code>y = x + a/3</code>{" "}
-          removes the square term and gives the <em>depressed cubic</em>{" "}
-          <code>y³ + py + q</code>, with:
+          Start with <code>x³ + ax² + bx + c</code>. Sub in <code>y = x + a/3</code>, the
+          square term drops out and you get the <em>depressed cubic</em>{" "}
+          <code>y³ + py + q</code>:
         </p>
         <pre>{`p = b − a²/3
 q = 2a³/27 − ab/3 + c`}</pre>
         <p>
-          The object the derivation turns on is{" "}
-          <code>D = (α−β)(β−γ)(γ−α)</code>. The sign flips when the roots are swapped, so it is not symmetric - but its square is, and equals the discriminant:
+          Everything hangs on <code>D = (α−β)(β−γ)(γ−α)</code>. Swap two roots and it flips
+          sign, so it&rsquo;s not symmetric. Square it though and it is, and that&rsquo;s the
+          discriminant:
         </p>
         <pre>{`Δ = D² = −4p³ − 27q²`}</pre>
         <p>
-          With <code>ω = (−1 + i√3)/2</code>, the primitive cube root of unity, the Lagrange 
-          resolvent (thanks Joseph!) <code>A = α + ωβ + ω²γ</code> has a cube expressible entirely in{" "}
-          <code>p</code>, <code>q</code> and <code>D</code>, and that gives us the roots:
+          Take <code>ω = (−1 + i√3)/2</code>, the primitive cube root of unity. The Lagrange
+          resolvent (thanks Joseph) <code>A = α + ωβ + ω²γ</code> has a cube you can write
+          purely in <code>p</code>, <code>q</code> and <code>D</code>, and the roots fall out
+          of that:
         </p>
         <pre>{`A³ = −27q/2 − (3i√3/2)·D
 
@@ -122,9 +121,9 @@ q = 2a³/27 − ab/3 + c`}</pre>
 γ = ωA/3 − ω²p/A`}</pre>
 
         <p className="muted">
-          Below, you can change the coefficients and watch the whole chain follow; the depressed form, the
-          discriminant, the class, and the Form itself. Every figure on this page runs
-          on a live pipeline, so they are live examples.
+          Mess with the coefficients and watch the whole chain follow: depressed form,
+          discriminant, class, the Form itself. Every figure on this page is the real
+          pipeline running live.
         </p>
         <MathDemo
           mode="coefficients"
@@ -144,10 +143,16 @@ q = 2a³/27 − ab/3 + c`}</pre>
       <section>
         <h3>2 · The choice that becomes the Phase</h3>
         <p>
-          <code>A³</code> has three cube roots. Replacing <code>A</code> with{" "} <code>ωA</code> sends α → γ → β: the same root <em>set</em>, relabeled. That residual freedom (what is left after you fix a square root and then a cube root) is the only genuine flexibility in the solution, and it is what the{" "} <strong>Phase</strong> trait records. Each Form commits to one branch, which rotates its ω-triad by a third of a turn.
+          <code>A³</code> has three cube roots. Swap <code>A</code> for <code>ωA</code> and
+          α → γ → β. Same <em>set</em> of roots, new labels. That leftover freedom, after
+          you&rsquo;ve picked a square root and then a cube root, is the only real wiggle
+          room in the whole solution, and it&rsquo;s what the <strong>Phase</strong> trait
+          records. Each Form commits to one branch, which turns its ω-triad a third of a turn.
         </p>
         <p>
-          In an earlier version, I tried to derive phase from <code>arg(A)</code>. But it was nearly constant for most real-coefficient samples, with floating-point noise deciding the remainder, so 98.6% of generations got the same value and came out identical. Oops.
+          Early on I tried getting phase from <code>arg(A)</code>. Turns out it&rsquo;s nearly
+          constant for most real-coefficient samples, with floating point noise deciding the
+          rest, so 98.6% of generations got the same value and came out identical. Oops.
         </p>
         <MathDemo
           mode="coefficients"
@@ -155,14 +160,14 @@ q = 2a³/27 − ab/3 + c`}</pre>
           readouts={["structure", "class"]}
           controls={[
             { key: "branch", label: "branch ω", min: 0, max: 2, step: 1, initial: 0,
-              hint: "the same roots, relabeled - the triad turns by a third" },
+              hint: "same roots, relabeled. the triad turns a third" },
           ]}
         />
       </section>
 
       <section>
         <h3>3 · From solution to Form</h3>
-        <p>The discriminant&rsquo;s sign selects a family of archetypes:</p>
+        <p>The sign of the discriminant picks a family:</p>
         <table className="doc-table">
           <thead>
             <tr>
@@ -184,21 +189,19 @@ q = 2a³/27 − ab/3 + c`}</pre>
             ))}
           </tbody>
         </table>
-        <p className="muted">
-          Family sizes are proportional to how often each class occurs, which is a fact
-          about random real cubics rather than a preference. Splitting all three evenly
-          would leave the Merged forms sharing a handful of Forms each while a few
-          Fractured archetypes covered most of the collection.
+        <p>
+          Family sizes just follow how often each class actually turns up in random real
+          cubics, and if I split them evenly the Merged forms would each get a handful of
+          Forms while a couple of Fractured ones ate the whole collection.
         </p>
-        <p className="muted">
-          The repeated-root share is the one class frequency the collection sets rather
-          than measures. Random real cubics never land exactly on Δ = 0 in floating point,
-          so that tier is injected on purpose — at 8% of the supply, enough that all four
-          Merged forms exist in a 512-Form collection, and still the rarest tier by a wide
-          margin.
+        <p>
+          The repeated-root share is the one number I set instead of measuring, because
+          random real cubics basically never land on exactly Δ = 0 in floating point, so I
+          inject that tier on purpose at 8% of supply, which is enough for all four Merged
+          forms to show up in 512 and it&rsquo;s still the rarest tier by a mile.
         </p>
 
-        <p>Within a family, the coefficients drive everything:</p>
+        <p>Inside a family, the coefficients drive everything:</p>
         <table className="doc-table">
           <tbody>
             {DRIVERS.map(([sym, what, how]) => (
@@ -214,18 +217,17 @@ q = 2a³/27 − ab/3 + c`}</pre>
         </table>
 
         <p className="muted">
-          The same three solutions again. |c| moves them between archetypes as it crosses a
-          quartile boundary, |b| changes how fine the character grid is, and |a| changes how
-          tightly the camera sits.
+          Same three solutions again. |c| bumps them between archetypes when it crosses a
+          quartile boundary, |b| changes how fine the grid is, |a| moves the camera in or out.
         </p>
         <MathDemo
           mode="coefficients"
           samples={TRIO}
           readouts={["structure", "delta"]}
           controls={[
-            { key: "a", label: "a — framing", min: -9, max: 9, step: 0.1, initial: -5.44 },
-            { key: "b", label: "b — glyph density", min: -14, max: 14, step: 0.1, initial: -5.47 },
-            { key: "c", label: "c — curvature and archetype", min: -16, max: 16, step: 0.1, initial: 10.91 },
+            { key: "a", label: "a · framing", min: -9, max: 9, step: 0.1, initial: -5.44 },
+            { key: "b", label: "b · glyph density", min: -14, max: 14, step: 0.1, initial: -5.47 },
+            { key: "c", label: "c · curvature and archetype", min: -16, max: 16, step: 0.1, initial: 10.91 },
           ]}
         />
       </section>
@@ -233,39 +235,26 @@ q = 2a³/27 − ab/3 + c`}</pre>
       <section>
         <h3>4 · Energy and Feedback</h3>
         <p>
-          Two axes read quantities the rest of the derivation discards, which is why they
-          are separate traits rather than restatements of Δ.
+          Two traits read numbers the rest of the derivation throws away.{" "}
+          <strong>Energy</strong> is the biggest root modulus, which matters because the roots
+          get normalised to the unit disc before they place anything, and that used to toss
+          the absolute scale so two solutions with the same root triangle at totally
+          different sizes drew the same. Energy hands that number back, a <em>Still</em> Form
+          keeps its bodies tight and a <em>Violent</em> one flings them apart, and it&rsquo;s
+          the one lever that reaches all twenty-two forms.
         </p>
         <p>
-          <strong>Energy</strong> is the largest root modulus. Root positions are normalised
-          to the unit disc before they place the bodies, and that normalisation throws the
-          absolute scale away — two solutions with the same triangle of roots at wildly
-          different magnitudes drew identically. Energy recovers exactly that discarded
-          number and hands it back: every builder places its bodies from the root positions,
-          so a <em>Still</em> Form draws its roots in tight and a <em>Violent</em> one flings
-          them apart. It is the one lever that reaches all twenty-two forms.
-        </p>
-        <p>
-          <strong>Feedback</strong> is the distance between the two nearest roots. The
-          discriminant is <code>(α−β)(β−γ)(γ−α)</code> squared — a <em>product</em>, so one
-          tiny separation hides behind two large ones, and a Form can have a perfectly
-          ordinary |Δ| while two of its roots sit almost on top of each other. That is the
-          case this picks out, and at the extreme it is the repeated-root tier itself.
-        </p>
-        <p>
-          What it does is close a loop that is normally open. Every ASCII renderer, this one
-          included until now, runs one way: geometry in, characters out, nothing downstream.
-          Feedback carries the grid the pass produced last frame back into the luminance it
-          measures this frame, so bright cells leave a decaying trail as the piece turns and
-          the Form is partly drawn by its own afterimage. The trail is quantised to the same
-          twelve glyph levels on the way round, so it terraces into bands rather than
-          blurring. It is a motion trait: on the still it reads as a slight thickening, and
-          it only really appears once the piece moves.
+          <strong>Feedback</strong> is the gap between the two closest roots, which Δ
+          can&rsquo;t see since it&rsquo;s a product and one tiny gap hides behind two big
+          ones. It closes a loop that&rsquo;s normally open: ASCII renderers, mine included
+          until I fixed it, only run one way, geometry in and characters out. Now last
+          frame&rsquo;s grid feeds into the luminance this frame measures, so bright cells
+          drag a trail behind them, quantised to the same twelve glyph levels so it bands
+          instead of blurring. You mostly see it once things move.
         </p>
         <p className="muted">
-          These two sliders move the <em>roots</em>, not the traits — scale pushes them away
-          from the origin, separation slides the nearest pair together. Energy and Feedback
-          follow from that, which is exactly the claim above.
+          The sliders move the <em>roots</em>, not the traits, and Energy and Feedback just
+          follow.
         </p>
         <MathDemo
           mode="roots"
@@ -273,9 +262,9 @@ q = 2a³/27 − ab/3 + c`}</pre>
           readouts={["bands", "delta"]}
           controls={[
             { key: "scale", label: "root scale → Energy", min: 0.15, max: 2.4, step: 0.05, initial: 1,
-              hint: "how far the roots sit from the origin" },
+              hint: "how far out the roots sit" },
             { key: "separation", label: "pair separation → Feedback", min: 0, max: 2, step: 0.02, initial: 1,
-              hint: "at 0 the nearest two roots coincide and Δ goes to zero" },
+              hint: "at 0 the closest two roots meet and Δ hits zero" },
           ]}
         />
 
@@ -298,68 +287,72 @@ q = 2a³/27 − ab/3 + c`}</pre>
       </section>
 
       <section>
-        <h3>5 · Rendering</h3>
+        <h3>5 · The engine</h3>
         <p>
-          The scene is real 3D geometry in WebGL. It is then rendered into an offscreen
-          target sized to the character grid, read back, and each cell replaced by a glyph
-          chosen from its luminance —{" "}
-          <code>{" .:-=+*#%▒▓█"}</code> — tinted from the Form&rsquo;s ANSI palette. Depth
-          fog gives the ramp something to shade with; without it, evenly lit surfaces
-          flatten into a single character.
+          This is the engine part of the name. three.js handles the 3D and that&rsquo;s
+          about it, everything after is my own pipeline. The scene renders offscreen at three
+          by three samples per character cell, gets read back, and each cell&rsquo;s luminance
+          picks one of twelve glyphs from <code>{" .:-=+*#%▒▓█"}</code> and one of five inks
+          from the Form&rsquo;s ANSI palette, with the properly saturated cells getting the
+          accent. Then it paints the grid onto a 2D canvas character by character, batched by
+          ink so it stays fast, and the SVG export is that same grid as plain text rows, so
+          the vector version is the actual characters and not a trace.
         </p>
         <p>
-          Exposure is computed per Form over the cells that actually carry light, not the
-          whole frame. A sparse Orbital and a dense Tessellation would otherwise be crushed
-          in opposite directions.
+          Depth fog gives the ramp something to shade with or evenly lit surfaces flatten
+          into one character, and exposure gets set per Form off a histogram of only the
+          cells that actually have light in them, otherwise a sparse Orbital and a dense
+          Tessellation get crushed in opposite directions.
         </p>
       </section>
 
       <section>
-        <h3>6 · Uniqueness</h3>
+        <h3>6 · Sound</h3>
         <p>
-          Each Form&rsquo;s seed is <code>SHA-256(master ‖ id ‖ nonce)</code>, so no two
-          share one. Beyond that, generation rejects near-duplicates on two independent
-          gates: a <strong>structural</strong> one comparing the derived mathematics as a
-          weighted vector, and a <strong>perceptual</strong> one comparing a 496-bit hash of
-          the rendered image (240 gradient bits, 256 occupancy bits). Failing either
-          re-derives the Form under a bumped nonce. Both thresholds are calibrated from
-          measured distributions rather than guessed.
+          The <Link href="/lab">lab</Link> can listen. Share a tab&rsquo;s audio or pick a mic
+          or line-in (BlackHole gets you system audio on a Mac) and it splits the signal into
+          bass, mids and highs, each measured against a slowly fading peak so quiet and loud
+          tracks both use the full range. The kick gets its own path, a steep band-pass
+          around 60 Hz you can retune, measured against a floor that follows the level
+          between kicks so a rolling sub doesn&rsquo;t hold the form open, and the spacing
+          between kicks gives a BPM with a flywheel that keeps pumping through breakdowns.
         </p>
         <p>
-          Because the collection is settled before the mint opens, choosing your id takes
-          nothing away from that guarantee — every id already has verified-unique art.
+          None of it touches the math or the genotype, it&rsquo;s a live layer on top. The kick
+          pumps the size, mids push the glyph feedback, highs and kicks add spin, hi-hats tilt
+          it and tear the raster, all eased so it moves instead of twitching, and exports
+          come out clean.
         </p>
+      </section>
+
+      <section>
+        <h3>7 · Uniqueness</h3>
         <p>
-          Two Forms cannot collide in the first place: a Form is a pure function of{" "}
-          <code>(masterSeed, tokenId, nonce)</code>, and minting takes token ids and nothing
-          else. There is no way to submit coefficients or a seed, so sharing a Form would
-          mean sharing an id — which ERC-721 already forbids.
-        </p>
-        <p>
-          What that alone does not show is that the art you were shown is the art the token
-          is bound to, since the nonce lives off-chain. So the whole{" "}
-          <code>id → seed</code> table is hashed and written into the contract at
-          initialisation, with no setter, and the metadata pointer can be frozen. Both are
-          checkable here:
+          Every seed is <code>SHA-256(master ‖ id ‖ nonce)</code> and generation tosses
+          anything too close to an existing Form on two gates, one comparing the math as a
+          weighted vector and one comparing a 496-bit hash of the actual render, re-rolling
+          the nonce until it passes. It&rsquo;s all settled before the mint, minting only
+          takes ids so nobody can sneak in their own coefficients, and the whole{" "}
+          <code>id → seed</code> table is hashed into the contract with no setter, so you can
+          check the art you saw is the art you got:
         </p>
         <ProvenanceCheck />
       </section>
 
       <section>
-        <h3>7 · What the maths does not decide</h3>
+        <h3>8 · What the math doesn&rsquo;t decide</h3>
         <p>
-          Worth stating plainly. The maths decides the coefficients, the depressed form, Δ
+          Being straight about this. The math decides the coefficients, the depressed form, Δ
           and its sign, the three roots as points in ℂ, the resolvent and its branch. Across
           the whole supply the worst residual <code>|p(root)|</code> is{" "}
-          <strong>1.3 × 10⁻⁷</strong> — the roots really do satisfy their equations.
+          <strong>1.3 × 10⁻⁷</strong>, so yes, the roots actually solve their equations.
         </p>
         <p>
-          The maths does <em>not</em> decide that Δ&lt;0 should look like a knot rather than
-          a tower. The {ARCHETYPES.length} archetypes are an authored vocabulary; the
-          equation chooses among them and drives every parameter inside them, but the
-          vocabulary itself is a design decision, not a theorem. The primitives being
-          composed — torus knot, icosahedron, cone — are parametric generators from three.js,
-          evaluated at runtime, never loaded as assets.
+          The math does <em>not</em> decide that Δ &lt; 0 should look like a knot and not a
+          tower. The {ARCHETYPES.length} archetypes are a vocabulary I wrote. The equation
+          picks from it and drives every parameter inside, but the vocabulary is a design
+          call, not a theorem. The primitives (torus knot, icosahedron, cone) are parametric
+          generators from three.js, built at runtime, never loaded as assets.
         </p>
       </section>
 
@@ -371,7 +364,7 @@ q = 2a³/27 − ab/3 + c`}</pre>
             <a href={ARTICLE} target="_blank" rel="noreferrer noopener">
               How to Solve Cubic and Quartic Equations II: Cubics
             </a>{" "}
-            <span className="muted">— hidden-phenomena.com</span>
+            <span className="muted">· hidden-phenomena.com</span>
           </li>
           <li>
             The prompt for the whole thing:{" "}

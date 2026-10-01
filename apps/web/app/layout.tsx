@@ -7,7 +7,7 @@ import { Providers } from "./providers";
 
 const TITLE = "Cubic Symmetry Engine";
 const DESCRIPTION =
-  "512 generative works, each visualising the algebraic structure of one cubic equation — roots, discriminant, and threefold symmetry.";
+  "512 generative works, each visualising the algebraic structure of one cubic equation: roots, discriminant, and threefold symmetry.";
 
 /**
  * Canonical origin, for resolving the OpenGraph image to an absolute URL —
@@ -29,9 +29,10 @@ export const metadata: Metadata = {
   title: TITLE,
   description: DESCRIPTION,
   applicationName: TITLE,
-  // wordmark.svg is the logo; og.png is the same wordmark rasterised, because
-  // OpenGraph consumers do not render SVG
-  icons: { icon: "/wordmark.svg" },
+  // favicon.svg is the ω-triad (a cubic's three roots), repainted live in the
+  // current scheme's colours by ThemeSwitch. og.png is the wordmark rasterised,
+  // because OpenGraph consumers do not render SVG.
+  icons: { icon: "/favicon.svg" },
   openGraph: {
     type: "website",
     siteName: TITLE,

@@ -8,6 +8,30 @@ The one-way doors are flagged **⚠ permanent**. Everything else can be redone.
 
 ---
 
+## Demo deploy (no contract)
+
+To put the site up before anything is deployed on chain. In Vercel:
+
+- **Root Directory:** `apps/web` (framework Next.js; pnpm is picked up from the
+  root lockfile)
+- **Environment Variables:** just
+
+  ```
+  MODE=DEMO
+  ```
+
+That's the lot. In demo the mint panel reads CLOSED and solves Forms locally,
+the output page says "closed till post mint", the provenance check says the
+contract isn't deployed yet, and nothing calls the chain or `/api/rpc`, so no
+Alchemy key or contract address is needed. The Lab, art and math pages are
+unaffected.
+
+Going live later: deploy the contract (below), set `MODE=LIVE` (or delete it)
+plus the step 7 variables, and redeploy. `MODE` is baked in at build time, so
+changing it needs a redeploy, not just a restart.
+
+---
+
 ## 0. Prerequisites
 
 - `pnpm setup` has been run (installs deps, Playwright chromium, forge libs)

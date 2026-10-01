@@ -275,7 +275,7 @@ export function Gallery() {
 
       {loadError && (
         <div className="empty">
-          Token index unavailable — run <code>pnpm generate</code> first.
+          Token index unavailable. Run <code>pnpm generate</code> first.
           <div style={{ fontSize: 11, marginTop: 6 }}>{loadError}</div>
         </div>
       )}

@@ -15,7 +15,7 @@ import {
 import { readContract } from "wagmi/actions";
 import { COLLECTION, type Token, deriveToken, tokenSummary } from "@cse/core";
 import { CSE_ABI, MINT_STATE } from "@/lib/abi";
-import { CONTRACT_ADDRESS, MASTER_SEED, activeChain, wagmiConfig } from "@/lib/config";
+import { CONTRACT_ADDRESS, IS_DEMO, MASTER_SEED, activeChain, wagmiConfig } from "@/lib/config";
 import { pickAvailable, useMintedSet } from "@/lib/minted";
 import { describeTxError } from "@/lib/errors";
 import { nonceFor, useTokenIndex } from "@/lib/tokens";
@@ -72,7 +72,7 @@ export function MintBox() {
         args: [address ?? "0x0000000000000000000000000000000000000000"],
       },
     ],
-    query: { refetchInterval: 12_000 },
+    query: { refetchInterval: 12_000, enabled: !IS_DEMO },
   });
 
   const state = (data?.[0]?.result as number | undefined) ?? 0;
@@ -81,14 +81,15 @@ export function MintBox() {
   const remaining = Number((data?.[3]?.result as bigint | undefined) ?? 0n);
   const maxPerWallet = Number((data?.[4]?.result as bigint | undefined) ?? 20n);
   const walletMinted = Number((data?.[5]?.result as bigint | undefined) ?? 0n);
-  const label = MINT_STATE[state] ?? "CLOSED";
+  // A demo has no contract to ask: always closed.
+  const label = IS_DEMO ? "CLOSED" : (MINT_STATE[state] ?? "CLOSED");
   const isLive = label === "LIVE";
   const walletRemaining = Math.max(0, maxPerWallet - walletMinted);
 
   const { data: balance } = useBalance({
     address,
     chainId: activeChain.id,
-    query: { enabled: !!address, refetchInterval: 20_000 },
+    query: { enabled: !!address && !IS_DEMO, refetchInterval: 20_000 },
   });
 
   const { writeContract, data: hash, isPending, error, reset } = useWriteContract();
@@ -184,7 +185,7 @@ export function MintBox() {
         <dl className="kv">
           <dt>Form</dt>
           <dd>
-            {ready ? `#${pad(id)}` : "—"}
+            {ready ? `#${pad(id)}` : "-"}
             {/* "available" needs a completed read behind it, not merely an
                 empty set that has not been filled in yet */}
             {ready && isLive && mintedKnown && !minted.has(id) && (
@@ -192,12 +193,12 @@ export function MintBox() {
             )}
           </dd>
           <dt>Equation</dt>
-          <dd>{ready ? shown.equation : "—"}</dd>
+          <dd>{ready ? shown.equation : "-"}</dd>
           <dt>Structure</dt>
           <dd>
             {ready
               ? `${shown.traits.structure} · ${shown.traits.rootState} · ω${shown.traits.phase}`
-              : "—"}
+              : "-"}
           </dd>
         </dl>
 
@@ -212,9 +213,11 @@ export function MintBox() {
 
         {!isLive && (
           <p style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 10, marginBottom: 0 }}>
-            {label === "SOLD_OUT"
-              ? "The mint has closed. Every Form is in the gallery."
-              : "The mint has not opened. This is the real renderer running a real Form."}
+            {IS_DEMO
+              ? "Mint's closed for now. This is the real renderer running a real Form, solve away."
+              : label === "SOLD_OUT"
+                ? "The mint has closed. Every Form is in the gallery."
+                : "The mint has not opened. This is the real renderer running a real Form."}
           </p>
         )}
 
@@ -222,7 +225,7 @@ export function MintBox() {
           <div style={{ marginTop: 14 }}>
             <dl className="kv">
               <dt>You mint</dt>
-              <dd style={{ color: "var(--accent)" }}>this one — #{pad(id)}</dd>
+              <dd style={{ color: "var(--accent)" }}>this one, #{pad(id)}</dd>
               <dt>Price</dt>
               <dd>{formatEther(price)} ETH</dd>
               <dt>Minted</dt>
@@ -359,7 +362,7 @@ export function MintBox() {
             {wrongChain && (
               <div className="status warn">
                 Your wallet is on chain {walletChainId}. This collection lives on{" "}
-                {activeChain.name} ({activeChain.id}) — minting will switch it for you.
+                {activeChain.name} ({activeChain.id}). Minting will switch it for you.
               </div>
             )}
 

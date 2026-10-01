@@ -181,9 +181,9 @@ export function ExportBar({ engine, name }: { engine: Engine | null; name: strin
               {(pressure > PRESSURE_WARN || bytes > BYTES_WARN) && (
                 <div className={`opt-warn ${tooHeavy ? "hard" : ""}`}>
                   {tooHeavy
-                    ? `Too large to encode in the browser — ${frames} frames at ${outSize}px will not fit in memory. Reduce the size, rate or length.`
+                    ? `Too large to encode in the browser: ${frames} frames at ${outSize}px will not fit in memory. Reduce the size, rate or length.`
                     : bytes > BYTES_WARN
-                      ? `About ${size(bytes)} — large enough to be awkward to share. ${frames} frames at ${outSize}px will also take a while.`
+                      ? `About ${size(bytes)}, large enough to be awkward to share. ${frames} frames at ${outSize}px will also take a while.`
                       : `Heavy: ${frames} frames at ${outSize}px. This will take a while.`}
                 </div>
               )}

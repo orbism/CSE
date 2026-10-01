@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useReadContract } from "wagmi";
 import { COLLECTION } from "@cse/core";
 import { CSE_ABI } from "./abi";
-import { CONTRACT_ADDRESS, activeChain } from "./config";
+import { CONTRACT_ADDRESS, IS_DEMO, activeChain } from "./config";
 
 /**
  * Which ids are already taken.
@@ -19,7 +19,7 @@ export function useMintedSet() {
     abi: CSE_ABI,
     functionName: "mintedBitmap",
     chainId: activeChain.id,
-    query: { refetchInterval: 15_000 },
+    query: { refetchInterval: 15_000, enabled: !IS_DEMO },
   });
 
   const minted = useMemo(() => {

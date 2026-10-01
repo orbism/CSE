@@ -50,8 +50,8 @@ const SOUND_SECTIONS: {
     col: 0,
     knobs: [
       ["pump", 0, 2],
-      ["snap", 0.3, 2, "pulse length — lower is tighter"],
-      ["kickHz", 35, 120, "kick band — lower isolates the kick from the bass line"],
+      ["snap", 0.3, 2, "pulse length, lower is tighter"],
+      ["kickHz", 35, 120, "kick band, lower isolates the kick from the bass line"],
       ["squash", 0, 2],
       ["breathe", 0, 2, "swell with the bass level"],
     ],
@@ -73,7 +73,7 @@ const SOUND_SECTIONS: {
     knobs: [
       ["feedback", 0, 2],
       ["glitch", 0, 2],
-      ["flash", 0, 1, "strobe — photosensitivity warning"],
+      ["flash", 0, 1, "strobe, photosensitivity warning"],
     ],
   },
 ];

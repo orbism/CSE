@@ -12,7 +12,7 @@ const NAV = [
   { href: "/output", label: "output", hint: "every Form, filterable" },
   { href: "/art", label: "art", hint: "why this looks the way it does" },
   { href: "/math", label: "math", hint: "how a cubic becomes a shape" },
-  { href: "/lab", label: "lab", hint: "build your own form — not mintable" },
+  { href: "/lab", label: "lab", hint: "build your own form, not mintable" },
 ];
 
 export function Masthead() {

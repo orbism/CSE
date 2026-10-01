@@ -2086,25 +2086,40 @@ footer {
   padding-top: 6px;
 }
 
+/* Every form as a tile, name underneath. */
 .forms {
-  margin: 14px 0 0;
+  margin: 18px 0 40px;
   display: grid;
-  gap: 10px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 34px 28px;
 }
 
-.forms > div {
-  display: grid;
-  grid-template-columns: 96px 130px minmax(0, 1fr);
-  gap: 16px;
-  align-items: center;
-  padding-bottom: 14px;
-  border-bottom: 1px dotted var(--line);
+@media (max-width: 560px) {
+  .forms {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 18px;
+  }
+}
+
+.forms figure {
+  margin: 0;
+}
+
+.forms figcaption {
+  margin-top: 10px;
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  text-align: center;
+  color: var(--accent);
 }
 
 .form-still {
   display: block;
-  width: 96px;
-  height: 96px;
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
   border: 1px solid var(--line);
   background: #1a1d1c;
   image-rendering: auto;
@@ -2175,33 +2190,7 @@ footer {
   color: var(--ink-faint);
 }
 
-.forms dt {
-  font-family: var(--display);
-  font-size: 13px;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--accent);
-}
 
-.forms dd {
-  margin: 0;
-  font-size: 14px;
-  color: var(--ink);
-  line-height: 1.65;
-}
-
-@media (max-width: 700px) {
-  .forms > div {
-    grid-template-columns: 72px minmax(0, 1fr);
-    gap: 4px 12px;
-    align-items: start;
-  }
-  .form-still {
-    width: 72px;
-    height: 72px;
-    grid-row: span 2;
-  }
-}
 
 /* ── wallet ─────────────────────────────────────────────────────────────── */
 
@@ -2717,4 +2706,21 @@ footer {
 
 .mark-e {
   color: var(--mark-e);
+}
+
+/* ── demo: output closed ────────────────────────────────────────────────── */
+
+.closed-note {
+  padding: 48px 0 64px;
+  max-width: 60ch;
+}
+
+.closed-note h2 {
+  margin-bottom: 14px;
+}
+
+.closed-note .mono-label {
+  color: var(--warn);
+  font-size: 15px;
+  margin: 0 0 12px;
 }

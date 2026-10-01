@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useReadContracts } from "wagmi";
 import { CSE_ABI } from "@/lib/abi";
-import { CONTRACT_ADDRESS, activeChain, provenanceUrl } from "@/lib/config";
+import { CONTRACT_ADDRESS, IS_DEMO, activeChain, provenanceUrl } from "@/lib/config";
 
 interface Published {
   masterSeed: string;
@@ -64,6 +64,7 @@ export function ProvenanceCheck() {
       { ...base, functionName: "masterSeed" },
       { ...base, functionName: "metadataFrozen" },
     ],
+    query: { enabled: !IS_DEMO },
   });
 
   const onChainHash = data?.[0]?.result as string | undefined;
@@ -78,7 +79,9 @@ export function ProvenanceCheck() {
   return (
     <div className="provenance">
       <Row label="On chain">
-        {onChainHash === undefined ? (
+        {IS_DEMO ? (
+          <span className="muted">contract not deployed yet</span>
+        ) : onChainHash === undefined ? (
           <span className="muted">reading…</span>
         ) : committed ? (
           <code>{onChainHash}</code>
@@ -101,10 +104,12 @@ export function ProvenanceCheck() {
         </Row>
       )}
       <Row label="Metadata">
-        {frozen === undefined ? (
+        {IS_DEMO ? (
+          <span className="muted">after the mint</span>
+        ) : frozen === undefined ? (
           <span className="muted">reading…</span>
         ) : frozen ? (
-          <span style={{ color: "var(--accent)" }}>frozen — the base URI can never change</span>
+          <span style={{ color: "var(--accent)" }}>frozen, the base URI can never change</span>
         ) : (
           <span className="muted">not yet frozen</span>
         )}
@@ -113,11 +118,11 @@ export function ProvenanceCheck() {
         <Row label="Check">
           {matches ? (
             <span style={{ color: "var(--accent)" }}>
-              match — the published art is the art committed to
+              match, the published art is the art that was committed to
             </span>
           ) : (
             <span style={{ color: "var(--danger)" }}>
-              MISMATCH — the published table does not hash to the on-chain commitment
+              MISMATCH: the published table doesn't hash to the on-chain commitment
             </span>
           )}
         </Row>

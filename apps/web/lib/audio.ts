@@ -218,7 +218,7 @@ export class AudioDrive {
     stream.getVideoTracks().forEach((t) => t.stop());
     if (stream.getAudioTracks().length === 0) {
       ctx.close();
-      throw new Error("No audio in that share — pick a tab or screen and tick “Share audio”.");
+      throw new Error("No audio in that share. Pick a tab or screen and tick “Share audio”.");
     }
     return new AudioDrive(ctx, stream, onEnded);
   }

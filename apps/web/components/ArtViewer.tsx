@@ -50,7 +50,7 @@ export function ArtViewer({
         <button
           className={spin ? "" : "on"}
           onClick={() => setSpin((s) => !s)}
-          title={spin ? "Hold the Form still — you can then drag to turn it" : "Resume rotation"}
+          title={spin ? "Hold the Form still, then drag to turn it" : "Resume rotation"}
         >
           {spin ? "Pause" : "Play"}
         </button>

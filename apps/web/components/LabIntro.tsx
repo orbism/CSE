@@ -22,7 +22,7 @@ export function LabIntro() {
   return (
     <div className="lab-intro">
       <p className="lede">
-        Build a form from a <em>chain of operators</em> — the chain is the artefact, it lives in
+        Build a form from a <em>chain of operators</em>. The chain is the artefact, it lives in
         the URL, and it mutates and breeds.{" "}
         <button className="lab-intro-more" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
           {open ? "less" : "more"}

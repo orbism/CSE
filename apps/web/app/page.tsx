@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { MintBox } from "@/components/MintBox";
 
-export const metadata = { title: "Cubic Symmetry Engine — input" };
+export const metadata = { title: "Cubic Symmetry Engine · input" };
 
 export default function InputPage() {
   return (
@@ -22,13 +22,13 @@ export default function InputPage() {
           root and then a cube root, and that second choice leaves exactly three
           possibilities related by ω, the primitive cube root of unity. Each Form commits
           to one of them, which rotates its ω-triad by a third of a turn and relabels
-          which root is α. Nothing here is decoration layered on top of a random seed —
+          which root is α. Nothing here is decoration layered on top of a random seed,
           change the equation and the whole form changes with it. Rendered in WebGL, then
           resolved to a character grid.
         </p>
         <p style={{ color: "var(--ink-faint)", fontSize: 12 }}>
           Twenty-two structural archetypes across 512 Forms. Solve again until one is
-          yours, then mint that exact piece — ids are chosen, not queued.{" "}
+          yours, then mint that exact piece. Ids are chosen, not queued.{" "}
           <Link href="/math">How it works →</Link>
         </p>
       </div>

@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,
+  // MODE=DEMO|LIVE, set plainly in Vercel. Only NEXT_PUBLIC_* reaches the
+  // browser on its own, so it is copied into the build here.
+  env: { MODE: (process.env.MODE ?? "LIVE").toUpperCase() },
   // both workspace packages ship TypeScript source rather than a build step
   transpilePackages: ["@cse/core", "@cse/art"],
   webpack: (config) => {
