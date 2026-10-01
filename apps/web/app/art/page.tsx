@@ -56,8 +56,7 @@ export default function ArtPage() {
           </a>{" "}
           and it clicked. The same Δ that sorts every Form into a family is the thing that
           keeps that curve usable, and a Δ of zero is the one shape it can&rsquo;t touch.
-          The math securing the chain these live on, drawn in the characters I grew up
-          reading.
+          This way, the math securing the chain these Forms will live on is drawn in the characters I grew up with.
         </p>
       </section>
 

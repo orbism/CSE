@@ -157,10 +157,13 @@ export function MintBox() {
     <div className="panel">
       <div className="panel-head">
         <span>{isLive ? "Mint" : "The collection"}</span>
-        <span
-          className={`badge ${label === "LIVE" ? "live" : label === "SOLD_OUT" ? "sold" : "closed"}`}
-        >
-          {label.replace("_", " ")}
+        <span className="mint-state">
+          mint:{" "}
+          <span
+            className={`badge ${label === "LIVE" ? "live" : label === "SOLD_OUT" ? "sold" : "closed"}`}
+          >
+            {isLive ? "open" : "closed"}
+          </span>
         </span>
       </div>
 
