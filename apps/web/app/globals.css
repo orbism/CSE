@@ -2943,3 +2943,61 @@ body {
 .lab-chips.lab-sound-src .lab-advanced.on {
   border-style: solid;
 }
+
+/* ── wallet picker ──────────────────────────────────────────────────────── */
+
+.wallet-modal {
+  width: min(380px, 100%);
+}
+
+.wallet-modal .panel-head {
+  align-items: center;
+}
+
+.wallet-modal-close {
+  border: 0;
+  padding: 0 4px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.wallet-options {
+  display: grid;
+  gap: 6px;
+}
+
+.wallet-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  text-transform: none;
+  font-family: var(--body);
+  letter-spacing: 0.02em;
+  font-size: 14px;
+}
+
+.wallet-option img,
+.wallet-option-blank {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  border-radius: 6px;
+}
+
+.wallet-option-blank {
+  background: var(--line);
+}
+
+.wallet-option-note {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--accent);
+}
+
+.wallet-modal-empty {
+  margin: 0;
+  font-size: 14px;
+}

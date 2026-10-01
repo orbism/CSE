@@ -5,7 +5,6 @@ import { formatEther, parseEther } from "viem";
 import {
   useAccount,
   useBalance,
-  useConnect,
   useDisconnect,
   useReadContracts,
   useSwitchChain,
@@ -20,6 +19,7 @@ import { pickAvailable, useMintedSet } from "@/lib/minted";
 import { describeTxError } from "@/lib/errors";
 import { nonceFor, useTokenIndex } from "@/lib/tokens";
 import { ArtViewer } from "./ArtViewer";
+import { ConnectModal } from "./ConnectModal";
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const pad = (n: number) => String(n).padStart(4, "0");
@@ -36,7 +36,7 @@ const pad = (n: number) => String(n).padStart(4, "0");
  */
 export function MintBox() {
   const { address, isConnected, chainId: walletChainId } = useAccount();
-  const { connect, connectors, isPending: connecting } = useConnect();
+  const [picking, setPicking] = useState(false);
   const { disconnect } = useDisconnect();
   const { switchChainAsync, isPending: switching } = useSwitchChain();
 
@@ -239,24 +239,16 @@ export function MintBox() {
             </dl>
 
             {!isConnected ? (
-              connectors.length === 0 ? (
-                <div className="status err">
-                  No wallet detected. Install a browser wallet to mint.
-                </div>
-              ) : (
-                <div style={{ display: "grid", gap: 6, marginTop: 12 }}>
-                  {connectors.map((c) => (
-                    <button
-                      key={c.uid}
-                      className="primary"
-                      disabled={connecting}
-                      onClick={() => connect({ connector: c, chainId: activeChain.id })}
-                    >
-                      {connecting ? "Connecting…" : `Connect ${c.name}`}
-                    </button>
-                  ))}
-                </div>
-              )
+              <>
+                <button
+                  className="primary"
+                  style={{ width: "100%", marginTop: 12 }}
+                  onClick={() => setPicking(true)}
+                >
+                  Connect wallet
+                </button>
+                <ConnectModal open={picking} onClose={() => setPicking(false)} />
+              </>
             ) : (
               <>
                 <button

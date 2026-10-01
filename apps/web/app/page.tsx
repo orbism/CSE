@@ -18,14 +18,15 @@ export default function InputPage() {
           roots to take, and each Form commits to one.
         </p>
         <p>
-          Then it gets rendered like it&rsquo;s 1994. Real 3D, pixels thrown out, every cell
-          redrawn as a character, straight out of the 90s demo scene. If you remember BBSes,
-          file_id.diz and a 64k intro melting your 486, you already know the look. Smells
-          like a dial-up handshake.
+          It then gets rendered like it&rsquo;s 1994 in real 3D with some pixels thrown out, every cell
+          redrawn as a glyph. If you remember BBSes, the 90s demo scene, 
+          file_id.diz and a 64k intro melting your 486, you already know the look. Can you hear the dial-up handshake?
         </p>
         <p>
-          22 forms across 512 Forms. Solve again till one&rsquo;s yours, then mint that exact
-          one. The whole thing started with{" "}
+          There are 22 forms across 512 Forms that you can solve till you find ones that are meant to be yours. Visit the lab to mess around further.
+	</p> 
+	<p>
+		Inspired by{" "}
           <a href={TWEET} target="_blank" rel="noreferrer noopener">
             a post by Vitalik
           </a>{" "}
