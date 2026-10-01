@@ -6,6 +6,9 @@ out/
 .env.local
 *.log
 
+.DS_Store
+*/.DS_Store
+
 # foundry
 packages/contracts/cache/
 packages/contracts/out/
