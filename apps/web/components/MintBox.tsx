@@ -217,7 +217,7 @@ export function MintBox() {
         {!isLive && (
           <p style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 10, marginBottom: 0 }}>
             {IS_DEMO
-              ? "Mint's closed for now. This is the real renderer running a real Form, solve away."
+              ? "Mint opens mid October, check back then. Till then it's the real renderer running real Forms, so solve away."
               : label === "SOLD_OUT"
                 ? "The mint has closed. Every Form is in the gallery."
                 : "The mint has not opened. This is the real renderer running a real Form."}
