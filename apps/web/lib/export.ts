@@ -310,3 +310,67 @@ export async function exportMp4(
   }
   await ffmpeg.deleteFile("out.mp4").catch(() => {});
 }
+
+// ── live MP4, with sound ────────────────────────────────────────────────────
+
+/**
+ * Record the live canvas and its audio in real time.
+ *
+ * Sound only exists as it plays, so unlike the loop exports this can't be
+ * rendered frame by frame: it records the canvas exactly as it animates,
+ * reacting to the music, for `seconds`. Browsers that can record MP4 directly
+ * (Safari, recent Chrome) hand back the file as is; otherwise it records WebM
+ * and the same ffmpeg.wasm encoder turns it into H.264 + AAC.
+ */
+export async function recordLiveMp4(
+  canvas: HTMLCanvasElement,
+  audio: MediaStream,
+  opts: { fps: number; seconds: number },
+  name: string,
+  onProgress?: Progress,
+) {
+  const video = canvas.captureStream(opts.fps);
+  const stream = new MediaStream([...video.getVideoTracks(), ...audio.getAudioTracks()]);
+  const pick = (types: string[]) => types.find((t) => MediaRecorder.isTypeSupported(t));
+  const mp4 = pick(['video/mp4;codecs="avc1.640028,mp4a.40.2"', "video/mp4"]);
+  const type = mp4 ?? pick(["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"]);
+  if (!type) throw new Error("This browser can't record video.");
+
+  const rec = new MediaRecorder(stream, { mimeType: type, videoBitsPerSecond: 12e6, audioBitsPerSecond: 192e3 });
+  const chunks: Blob[] = [];
+  rec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  const stopped = new Promise((r) => (rec.onstop = r));
+  rec.start(250);
+  const t0 = performance.now();
+  await new Promise<void>((done) => {
+    const check = () => {
+      const s = (performance.now() - t0) / 1000;
+      onProgress?.("recording", Math.min(opts.seconds, Math.floor(s)), opts.seconds);
+      if (s >= opts.seconds) done();
+      else setTimeout(check, 200);
+    };
+    check();
+  });
+  rec.stop();
+  await stopped;
+  video.getTracks().forEach((t) => t.stop());
+
+  let out = new Blob(chunks, { type: "video/mp4" });
+  if (!mp4) {
+    const ffmpeg = await loadFfmpeg(onProgress);
+    onProgress?.("encoding", 0, 1);
+    await ffmpeg.writeFile("live.webm", new Uint8Array(await new Blob(chunks).arrayBuffer()));
+    await ffmpeg.exec([
+      "-i", "live.webm",
+      "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+      "-pix_fmt", "yuv420p", "-vf", "scale=trunc(iw/2)*2:trunc(ih/2)*2",
+      "-c:a", "aac", "-b:a", "192k",
+      "-movflags", "+faststart",
+      "live.mp4",
+    ]);
+    out = new Blob([toBlobPart((await ffmpeg.readFile("live.mp4")) as Uint8Array)], { type: "video/mp4" });
+    await ffmpeg.deleteFile("live.webm").catch(() => {});
+    await ffmpeg.deleteFile("live.mp4").catch(() => {});
+  }
+  download(out, `${name}.mp4`);
+}

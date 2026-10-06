@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { LabEngine } from "@cse/art";
+import type { AudioDrive } from "@/lib/audio";
 import {
   DEFAULT_GIF_FPS,
   DEFAULT_GIF_SIZE,
@@ -18,11 +19,14 @@ import {
   exportMp4,
   exportPng,
   frameCount,
+  recordLiveMp4,
 } from "@/lib/export";
 
 /** Square video edges: 720p, 1080p and 1440p heights. */
 const MP4_SIZES = [720, 1080, 1440] as const;
-const LOOPS = [1, 2] as const;
+/** A silent MP4 is two seamless revolutions; one with sound, 1 to 4 turns' worth. */
+const SILENT_LOOPS = 2;
+const AUDIO_LOOPS = [1, 2, 3, 4] as const;
 
 type Format = "png" | "gif" | "mp4";
 
@@ -30,10 +34,26 @@ type Format = "png" | "gif" | "mp4";
  * PNG, GIF and MP4 for a Lab form. The MP4 encoder is a 31 MB ffmpeg wasm
  * blob, loaded only when an MP4 is actually asked for.
  *
+ * An MP4 can carry the Lab's live audio (tab, mic or radio). That one is
+ * recorded in real time, visuals reacting as they play, rather than rendered
+ * as a seamless loop: sound can't be rendered ahead of time.
+ *
  * The Lab needs its own bar rather than the gallery's because of the feedback
  * loop — see `loop` below, which the gallery has no concept of.
  */
-export function LabExportBar({ engine, name }: { engine: LabEngine | null; name: string }) {
+export function LabExportBar({
+  engine,
+  name,
+  canvas,
+  audio,
+}: {
+  engine: LabEngine | null;
+  name: string;
+  /** The Lab's live canvas, recorded when the MP4 carries sound. */
+  canvas: HTMLCanvasElement | null;
+  /** The Lab's current audio input, if any. */
+  audio: AudioDrive | null;
+}) {
   const [open, setOpen] = useState<Format | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [status, setStatus] = useState("");
@@ -42,11 +62,13 @@ export function LabExportBar({ engine, name }: { engine: LabEngine | null; name:
   const [gifSize, setGifSize] = useState<number>(DEFAULT_GIF_SIZE);
   const [mp4Fps, setMp4Fps] = useState<number>(DEFAULT_MP4_FPS);
   const [mp4Size, setMp4Size] = useState<number>(MP4_SIZES[1]);
-  const [loops, setLoops] = useState<number>(1);
+  const [withAudio, setWithAudio] = useState(false);
+  const [audioLoops, setAudioLoops] = useState(2);
   const [seconds, setSeconds] = useState<number>(DEFAULT_SECONDS);
 
   const fps = open === "mp4" ? mp4Fps : gifFps;
-  const frames = frameCount({ fps, seconds }) * (open === "mp4" ? loops : 1);
+  const live = withAudio && !!audio && !!canvas;
+  const frames = frameCount({ fps, seconds }) * (open === "mp4" ? SILENT_LOOPS : 1);
 
   async function run(job: string, fn: () => Promise<void>) {
     if (!engine || busy) return;
@@ -167,26 +189,55 @@ export function LabExportBar({ engine, name }: { engine: LabEngine | null; name:
         <div className="export-opts">
           <Choices label="Size" options={MP4_SIZES} value={mp4Size} onChange={setMp4Size} />
           <Choices label="Rate" options={MP4_RATES} value={mp4Fps} onChange={setMp4Fps} />
-          <Choices label="Loops" options={LOOPS} value={loops} onChange={setLoops} />
+          <label className="opt-check" title={audio ? "" : "Pick an input in Sound first"}>
+            <input
+              type="checkbox"
+              checked={live}
+              disabled={!audio}
+              onChange={(e) => setWithAudio(e.target.checked)}
+            />
+            Record audio{audio ? "" : " · pick an input in Sound first"}
+          </label>
+          {live && <Choices label="Loops" options={AUDIO_LOOPS} value={audioLoops} onChange={setAudioLoops} />}
           {secondsSlider}
           <div className="export-note">
-            {frames} frames · {loops === 1 ? "one revolution" : `${loops} revolutions`} ·{" "}
-            {seconds * loops}s
+            {live
+              ? `records live with sound · ${seconds * audioLoops}s`
+              : `${frames} frames · two seamless revolutions · ${seconds * SILENT_LOOPS}s`}
           </div>
           <button
             className="primary"
             disabled={busy !== null}
             onClick={() =>
-              loop("mp4", (o) => exportMp4(engine!, name, o, progress), {
-                fps: mp4Fps,
-                seconds,
-                size: mp4Size,
-                hud: false,
-                loops,
-              })
+              live
+                ? run("mp4", async () => {
+                    // the canvas renders at the export size while it records,
+                    // and keeps animating so it reacts to the music
+                    const wasRunning = engine!.running;
+                    const prev = canvas!.width;
+                    engine!.start();
+                    engine!.resize(mp4Size);
+                    const tap = audio!.record();
+                    try {
+                      await recordLiveMp4(canvas!, tap.stream, { fps: mp4Fps, seconds: seconds * audioLoops }, name, progress);
+                    } finally {
+                      tap.release();
+                      engine!.resize(prev);
+                      if (!wasRunning) engine!.stop();
+                    }
+                  })
+                : loop("mp4", (o) => exportMp4(engine!, name, o, progress), {
+                    fps: mp4Fps,
+                    seconds,
+                    size: mp4Size,
+                    hud: false,
+                    loops: SILENT_LOOPS,
+                  })
             }
           >
-            {busy === "mp4" ? status || "Encoding…" : `Download MP4 · ${mp4Size}² · ${mp4Fps}fps`}
+            {busy === "mp4"
+              ? status || "Encoding…"
+              : `${live ? "Record" : "Download"} MP4 · ${mp4Size}² · ${mp4Fps}fps`}
           </button>
         </div>
       )}

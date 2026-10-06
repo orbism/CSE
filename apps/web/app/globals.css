@@ -3108,3 +3108,13 @@ body {
   text-transform: none;
   letter-spacing: 0.06em;
 }
+
+/* The export window stands apart in every scheme: its border takes the
+   scheme's own warning colour, which every palette defines. */
+.lab-win[data-win="export"] {
+  border-color: color-mix(in srgb, var(--warn) 70%, var(--line));
+}
+
+.lab-win[data-win="export"] .lab-win-head {
+  border-bottom-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+}

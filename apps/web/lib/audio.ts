@@ -285,6 +285,16 @@ export class AudioDrive {
   /** For the engine: the latest drive. */
   read = (): LabDrive => this.out;
 
+  /**
+   * The input as a recordable stream: the same signal the visuals react to
+   * (for the radio, before its volume). Call `release` when done.
+   */
+  record(): { stream: MediaStream; release: () => void } {
+    const dest = (this.input.context as AudioContext).createMediaStreamDestination();
+    this.input.connect(dest);
+    return { stream: dest.stream, release: () => this.input.disconnect(dest) };
+  }
+
   private range([lo, hi]: [number, number]): [number, number] {
     return [
       Math.max(1, Math.round(lo / this.binHz)),

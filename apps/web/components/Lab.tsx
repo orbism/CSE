@@ -791,7 +791,12 @@ export function Lab() {
         </LabWindow>
 
         <LabWindow id="export" title="Export" desk={desk} col={advanced ? 2 : 0}>
-          <LabExportBar engine={engine} name={`cse-lab-${genomeKey(genome)}`} />
+          <LabExportBar
+            engine={engine}
+            name={`cse-lab-${genomeKey(genome)}`}
+            canvas={canvasRef.current}
+            audio={audio?.drive ?? null}
+          />
         </LabWindow>
       </div>
       {/* connecting from "load yours" carries straight on to the picker */}
