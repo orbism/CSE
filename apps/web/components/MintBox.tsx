@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { formatEther, parseEther } from "viem";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { decodeEventLog, formatEther, parseEther } from "viem";
 import {
   useAccount,
   useBalance,
@@ -11,79 +11,62 @@ import {
   useWaitForTransactionReceipt,
   useWriteContract,
 } from "wagmi";
-import { readContract } from "wagmi/actions";
-import { COLLECTION, type Token, deriveToken, tokenSummary } from "@cse/core";
+import { COLLECTION, type Prior, type Token, capturePose, dHash, hashToHex, tokenSummary } from "@cse/core";
+import type { Engine } from "@cse/art";
 import { CSE_ABI, MINT_STATE } from "@/lib/abi";
-import { CONTRACT_ADDRESS, IS_DEMO, MASTER_SEED, activeChain, wagmiConfig } from "@/lib/config";
-import { pickAvailable, useMintedSet } from "@/lib/minted";
+import { CONTRACT_ADDRESS, IS_DEMO, activeChain } from "@/lib/config";
 import { describeTxError } from "@/lib/errors";
-import { nonceFor, useTokenIndex } from "@/lib/tokens";
+import { approve, priorsOf, rollClear } from "@/lib/roll";
+import { loadTokenIndex } from "@/lib/tokens";
 import { ArtViewer } from "./ArtViewer";
 import { ConnectModal } from "./ConnectModal";
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const pad = (n: number) => String(n).padStart(4, "0");
 
+type Phase = "rolling" | "checking" | "ready" | "approving" | "minting" | "minted";
+
 /**
- * Solve, look, mint.
+ * Roll, look, mint.
  *
- * The Form on screen is the Form the transaction mints — the contract takes
- * explicit token ids rather than handing out the next in sequence. "Solve
- * again" draws another id that nobody has taken yet.
+ * Nothing here is pre-made. "Solve again" rolls a fresh 32-byte seed, derives
+ * the Form from it on the spot, and clears it against every minted Form: the
+ * maths locally, the rendered fingerprint through the approver. Minting sends
+ * that exact seed with the approver's signature for this wallet, so what lands
+ * on chain is what is on screen and nobody else can take the roll.
  *
- * Downloads deliberately live in the gallery instead of here: you export a
- * piece you own, not one you are still deciding about.
+ * "Surprise me" runs the same pipeline with the canvas covered and mints the
+ * first clear roll sight unseen; the cover lifts when the transaction lands.
  */
 export function MintBox() {
   const { address, isConnected, chainId: walletChainId } = useAccount();
-  const [picking, setPicking] = useState(false);
   const { disconnect } = useDisconnect();
   const { switchChainAsync, isPending: switching } = useSwitchChain();
+  const [picking, setPicking] = useState(false);
 
-  // The wallet can sit on any network. Minting from the wrong one used to throw
-  // a raw wagmi mismatch error; now the button switches first and then mints.
-  const wrongChain =
-    isConnected && walletChainId !== undefined && walletChainId !== activeChain.id;
-  const index = useTokenIndex();
-  const { minted, refetch: refetchMinted, isLoading: mintedLoading } = useMintedSet();
-
-  /**
-   * Whether the minted set is real yet.
-   *
-   * Before the first `mintedBitmap` read lands, `minted` is an empty Set — which
-   * is indistinguishable from "nothing has been minted". Picking against it drew
-   * from all 512 ids with no exclusion and then labelled the result available, so
-   * on a slow first read the panel would offer a Form somebody already owns. An
-   * empty set is not evidence of availability; only a completed read is.
-   */
-  const mintedKnown = !mintedLoading;
+  const wrongChain = isConnected && walletChainId !== undefined && walletChainId !== activeChain.id;
 
   const base = { address: CONTRACT_ADDRESS, abi: CSE_ABI, chainId: activeChain.id } as const;
   const { data, refetch } = useReadContracts({
     contracts: [
       { ...base, functionName: "mintState" },
       { ...base, functionName: "price" },
-      { ...base, functionName: "totalSupply" },
+      { ...base, functionName: "totalMinted" },
       { ...base, functionName: "remainingPublic" },
       { ...base, functionName: "MAX_PER_WALLET" },
-      {
-        ...base,
-        functionName: "mintedBy",
-        args: [address ?? "0x0000000000000000000000000000000000000000"],
-      },
+      { ...base, functionName: "mintedBy", args: [address ?? "0x0000000000000000000000000000000000000000"] },
     ],
     query: { refetchInterval: 12_000, enabled: !IS_DEMO },
   });
-
   const state = (data?.[0]?.result as number | undefined) ?? 0;
   const price = (data?.[1]?.result as bigint | undefined) ?? parseEther("0.005");
   const supply = Number((data?.[2]?.result as bigint | undefined) ?? 0n);
   const remaining = Number((data?.[3]?.result as bigint | undefined) ?? 0n);
   const maxPerWallet = Number((data?.[4]?.result as bigint | undefined) ?? 20n);
   const walletMinted = Number((data?.[5]?.result as bigint | undefined) ?? 0n);
-  // A demo has no contract to ask: always closed.
   const label = IS_DEMO ? "CLOSED" : (MINT_STATE[state] ?? "CLOSED");
   const isLive = label === "LIVE";
+  const soldOut = remaining === 0 && supply > 0;
   const walletRemaining = Math.max(0, maxPerWallet - walletMinted);
 
   const { data: balance } = useBalance({
@@ -91,67 +74,143 @@ export function MintBox() {
     chainId: activeChain.id,
     query: { enabled: !!address && !IS_DEMO, refetchInterval: 20_000 },
   });
+  const { writeContractAsync, data: hash, error, reset } = useWriteContract();
+  const { data: receipt, isLoading: confirming, isSuccess } = useWaitForTransactionReceipt({ hash });
 
-  const { writeContract, data: hash, isPending, error, reset } = useWriteContract();
-  const { isLoading: confirming, isSuccess } = useWaitForTransactionReceipt({ hash });
+  // ── the roll ──────────────────────────────────────────────────────────────
+  const priorsRef = useRef<Prior[]>([]);
+  const [priorsReady, setPriorsReady] = useState(IS_DEMO);
+  const [seed, setSeed] = useState<`0x${string}` | null>(null);
+  const [token, setToken] = useState<Token | null>(null);
+  const [phase, setPhase] = useState<Phase>("rolling");
+  const [blind, setBlind] = useState(false);
+  const [note, setNote] = useState("");
+  const [mintedId, setMintedId] = useState<number | null>(null);
+  const engineRef = useRef<Engine | null>(null);
+  const rollId = useRef(0);
 
-  // ── the Form on screen ────────────────────────────────────────────────────
-  const [shownId, setShownId] = useState<number | null>(null);
-
-  const solveAgain = useCallback(() => {
-    setShownId((current) => pickAvailable(minted, current ?? undefined) ?? current);
-  }, [minted]);
-
-  // First pick happens on mount, not during render: rolling while rendering
-  // makes the server and client disagree and triggers a hydration mismatch.
-  // It also waits for the minted set, so the opening Form is never one that is
-  // already owned.
-  useEffect(() => {
-    if (shownId === null && mintedKnown) setShownId(pickAvailable(minted) ?? 1);
-  }, [minted, shownId, mintedKnown]);
-
-  // if someone takes the piece being looked at, move on rather than let the
-  // user send a transaction that is guaranteed to revert
-  useEffect(() => {
-    if (shownId !== null && minted.has(shownId)) solveAgain();
-  }, [minted, shownId, solveAgain]);
-
-  useEffect(() => {
-    if (isSuccess) {
-      refetch();
-      refetchMinted();
-      solveAgain();
+  // what the approver will compare against, derived here from the minted seeds
+  const loadPriors = useCallback(async (refresh = false) => {
+    if (IS_DEMO) return;
+    try {
+      priorsRef.current = priorsOf(await loadTokenIndex(refresh));
+    } catch {
+      // without the index the local gate is skipped; the approver still runs the real one
     }
-  }, [isSuccess, refetch, refetchMinted, solveAgain]);
+    setPriorsReady(true);
+  }, []);
+  useEffect(() => {
+    loadPriors();
+  }, [loadPriors]);
 
-  // `id` stays defined so the hooks below keep a stable shape; `ready` is what
-  // gates rendering, because #1 is a real token that may well be owned.
-  const ready = shownId !== null;
-  const id = shownId ?? 1;
+  /** A fresh seed that clears the structural gate; the perceptual gate follows once it has rendered. */
+  const roll = useCallback(() => {
+    rollId.current++;
+    const next = rollClear(priorsRef.current);
+    setSeed(next.seed);
+    setToken(next.token);
+    setMintedId(null);
+    setNote("");
+    setPhase(IS_DEMO ? "ready" : "checking");
+  }, []);
 
-  /** Set when the pre-flight read finds the Form gone; cleared on the next try. */
-  const [taken, setTaken] = useState<number | null>(null);
-  const [checking, setChecking] = useState(false);
+  // first roll waits for the priors so the opening Form is one that could actually mint
+  useEffect(() => {
+    if (priorsReady && !seed) roll();
+  }, [priorsReady, seed, roll]);
 
-  /**
-   * Deriving at nonce 0 is wrong for any token the generator re-rolled to
-   * satisfy the uniqueness gates — that Form's real art lives at a bumped
-   * nonce. The published index carries the settled value.
-   */
-  const token: Token = useMemo(
-    () => deriveToken(MASTER_SEED, id, nonceFor(index, id)),
-    [id, index.rows],
-  );
-  const shown = useMemo(() => tokenSummary(token), [token]);
-  const soldOut = remaining === 0 && supply > 0;
+  // Perceptual gate: fingerprint the live render and ask the approver (dry run).
+  // Rerolls silently on a collision, which is rare but real against a full set.
+  useEffect(() => {
+    if (phase !== "checking" || !token || !seed || !engineRef.current) return;
+    const mine = rollId.current;
+    const engine = engineRef.current;
+    const timer = setTimeout(async () => {
+      try {
+        const grid = engine.fingerprint(capturePose(token));
+        engine.redraw();
+        const minter = address ?? "0x0000000000000000000000000000000000000001";
+        const ok = await approve(seed, minter, hashToHex(dHash(grid)), true);
+        if (mine !== rollId.current) return;
+        if (ok) setPhase("ready");
+        else roll();
+      } catch (e) {
+        if (mine !== rollId.current) return;
+        setNote(e instanceof Error ? e.message : String(e));
+        setPhase("ready");
+      }
+    }, 60);
+    return () => clearTimeout(timer);
+  }, [phase, token, seed, address, roll]);
 
-  // Catch an empty wallet before the user signs. Minting costs the price plus
-  // gas, so compare against a little more than the price rather than the price
-  // exactly — otherwise the check passes and the wallet still rejects it.
+  // ── the mint ──────────────────────────────────────────────────────────────
+  const mint = useCallback(async () => {
+    if (!seed || !address || phase !== "ready") return;
+    reset();
+    setNote("");
+    if (wrongChain) {
+      try {
+        await switchChainAsync({ chainId: activeChain.id });
+      } catch {
+        return;
+      }
+    }
+    setPhase("approving");
+    try {
+      const grid = engineRef.current?.fingerprint(capturePose(token!));
+      engineRef.current?.redraw();
+      const approval = await approve(seed, address, grid ? hashToHex(dHash(grid)) : null, false);
+      if (!approval || approval === true) {
+        // someone minted something too close while this was on screen
+        setNote("That one just stopped being unique. Here is another.");
+        roll();
+        return;
+      }
+      setPhase("minting");
+      await writeContractAsync({
+        address: CONTRACT_ADDRESS,
+        abi: CSE_ABI,
+        functionName: "mint",
+        args: [seed, approval.deadline, approval.signature],
+        value: price,
+        chainId: activeChain.id,
+      });
+    } catch (e) {
+      setPhase("ready");
+      if (blind) setBlind(false);
+      const friendly = describeTxError(e as Error);
+      setNote(friendly.title + (friendly.detail ? ` ${friendly.detail}` : ""));
+    }
+  }, [seed, address, phase, wrongChain, switchChainAsync, reset, token, price, writeContractAsync, roll, blind]);
+
+  // blind mint: the moment the hidden roll is clear, send it
+  useEffect(() => {
+    if (blind && phase === "ready" && isConnected && isLive) void mint();
+  }, [blind, phase, isConnected, isLive, mint]);
+
+  // landed: read the id off the Minted event, lift the cover, refresh the set
+  useEffect(() => {
+    if (!isSuccess || !receipt) return;
+    for (const log of receipt.logs) {
+      try {
+        const ev = decodeEventLog({ abi: CSE_ABI, data: log.data, topics: log.topics });
+        if (ev.eventName === "Minted") setMintedId(Number(ev.args.tokenId));
+      } catch {
+        // not ours
+      }
+    }
+    setPhase("minted");
+    setBlind(false);
+    refetch();
+    loadPriors(true);
+  }, [isSuccess, receipt, refetch, loadPriors]);
+
+  const shown = useMemo(() => (token ? tokenSummary(token) : null), [token]);
   const gasHeadroom = parseEther("0.0004");
-  const shortOfFunds =
-    isConnected && balance !== undefined && balance.value < price + gasHeadroom;
+  const shortOfFunds = isConnected && balance !== undefined && balance.value < price + gasHeadroom;
   const friendly = error ? describeTxError(error) : null;
+  const busy = phase === "approving" || phase === "minting" || confirming;
+  const canMint = isLive && isConnected && phase === "ready" && !soldOut && walletRemaining > 0 && !shortOfFunds;
 
   return (
     <div className="panel">
@@ -159,25 +218,35 @@ export function MintBox() {
         <span>{isLive ? "Mint" : "The collection"}</span>
         <span className="mint-state">
           mint:{" "}
-          <span
-            className={`badge ${label === "LIVE" ? "live" : label === "SOLD_OUT" ? "sold" : "closed"}`}
-          >
+          <span className={`badge ${label === "LIVE" ? "live" : label === "SOLD_OUT" ? "sold" : "closed"}`}>
             {isLive ? "open" : "closed"}
           </span>
         </span>
       </div>
 
-      {ready ? (
-        <ArtViewer token={token} caption={`CSE #${pad(id)} · ${shown.traits.structure}`}>
-          <dl className="kv">
-            <dt>Equation</dt>
-            <dd>{shown.equation}</dd>
-            <dt>Depressed</dt>
-            <dd>{shown.depressed}</dd>
-            <dt>Δ</dt>
-            <dd>{shown.discriminant.toFixed(3)}</dd>
-          </dl>
-        </ArtViewer>
+      {token && shown ? (
+        <div className={`mint-stage${blind ? " blind" : ""}`}>
+          <ArtViewer
+            token={token}
+            caption={mintedId ? `CSE #${pad(mintedId)} · ${shown.traits.structure}` : `unminted · ${shown.traits.structure}`}
+            onEngine={(e) => (engineRef.current = e)}
+          >
+            <dl className="kv">
+              <dt>Equation</dt>
+              <dd>{shown.equation}</dd>
+              <dt>Depressed</dt>
+              <dd>{shown.depressed}</dd>
+              <dt>Δ</dt>
+              <dd>{shown.discriminant.toFixed(3)}</dd>
+            </dl>
+          </ArtViewer>
+          {blind && (
+            <div className="mint-blind">
+              <span className="mono-label">rolling in the dark</span>
+              <span>{busy ? "minting…" : phase === "checking" ? "checking it's one of a kind…" : "confirm in your wallet"}</span>
+            </div>
+          )}
+        </div>
       ) : (
         <div className="solving">
           <span className="mono-label">Solving…</span>
@@ -188,39 +257,61 @@ export function MintBox() {
         <dl className="kv">
           <dt>Form</dt>
           <dd>
-            {ready ? `#${pad(id)}` : "-"}
-            {/* "available" needs a completed read behind it, not merely an
-                empty set that has not been filled in yet */}
-            {ready && isLive && mintedKnown && !minted.has(id) && (
-              <span style={{ color: "var(--accent)" }}> · available</span>
+            {mintedId ? (
+              <span style={{ color: "var(--accent)" }}>#{pad(mintedId)} · yours</span>
+            ) : phase === "checking" ? (
+              <span className="muted">checking it&rsquo;s one of a kind…</span>
+            ) : phase === "ready" && !IS_DEMO ? (
+              <span style={{ color: "var(--accent)" }}>unique · unminted</span>
+            ) : (
+              "unminted"
             )}
           </dd>
           <dt>Equation</dt>
-          <dd>{ready ? shown.equation : "-"}</dd>
+          <dd>{blind ? "hidden" : (shown?.equation ?? "—")}</dd>
           <dt>Structure</dt>
           <dd>
-            {ready
-              ? `${shown.traits.structure} · ${shown.traits.rootState} · ω${shown.traits.phase}`
-              : "-"}
+            {blind
+              ? "hidden"
+              : shown
+                ? `${shown.traits.structure} · ${shown.traits.rootState} · ω${shown.traits.phase}`
+                : "—"}
           </dd>
         </dl>
 
-        <button
-          style={{ width: "100%", marginTop: 12 }}
-          onClick={solveAgain}
-          disabled={soldOut}
-          title="Draw another equation nobody has taken"
-        >
-          Solve again ⟳
-        </button>
+        <div className="mint-actions">
+          <button
+            onClick={() => {
+              setBlind(false);
+              roll();
+            }}
+            disabled={busy || soldOut}
+            title="Roll a fresh equation nobody has minted"
+          >
+            Solve again ⟳
+          </button>
+          {isLive && (
+            <button
+              onClick={() => {
+                if (!isConnected) return setPicking(true);
+                setBlind(true);
+                roll();
+              }}
+              disabled={busy || soldOut || walletRemaining === 0}
+              title="Mint the next clear roll without seeing it first"
+            >
+              Surprise me
+            </button>
+          )}
+        </div>
 
         {!isLive && (
-          <p style={{ fontSize: 11, color: "var(--ink-faint)", marginTop: 10, marginBottom: 0 }}>
+          <p className="mint-note">
             {IS_DEMO
-              ? "Mint opens mid October, check back then. Till then it's the real renderer running real Forms, so solve away."
+              ? "Mint opens mid October, check back then. Till then it's the real renderer rolling real Forms, so solve away."
               : label === "SOLD_OUT"
                 ? "The mint has closed. Every Form is in the gallery."
-                : "The mint has not opened. This is the real renderer running a real Form."}
+                : "The mint has not opened. This is the real renderer rolling real Forms."}
           </p>
         )}
 
@@ -228,7 +319,7 @@ export function MintBox() {
           <div style={{ marginTop: 14 }}>
             <dl className="kv">
               <dt>You mint</dt>
-              <dd style={{ color: "var(--accent)" }}>this one, #{pad(id)}</dd>
+              <dd style={{ color: "var(--accent)" }}>{blind ? "the one under the cover" : "this one, exactly"}</dd>
               <dt>Price</dt>
               <dd>{formatEther(price)} ETH</dd>
               <dt>Minted</dt>
@@ -242,112 +333,35 @@ export function MintBox() {
             </dl>
 
             {!isConnected ? (
-              <>
-                <button
-                  className="primary"
-                  style={{ width: "100%", marginTop: 12 }}
-                  onClick={() => setPicking(true)}
-                >
-                  Connect wallet
-                </button>
-                <ConnectModal open={picking} onClose={() => setPicking(false)} />
-              </>
+              <button className="primary" style={{ width: "100%", marginTop: 12 }} onClick={() => setPicking(true)}>
+                Connect wallet
+              </button>
             ) : (
               <>
-                <button
-                  className="primary"
-                  style={{ width: "100%", marginTop: 12 }}
-                  disabled={
-                    !ready ||
-                    checking ||
-                    isPending ||
-                    confirming ||
-                    switching ||
-                    walletRemaining === 0 ||
-                    soldOut ||
-                    shortOfFunds
-                  }
-                  onClick={async () => {
-                    reset();
-                    setTaken(null);
-                    // Ask the wallet to move first. If the user declines, stop
-                    // here rather than sending a transaction that cannot land.
-                    if (wrongChain) {
-                      try {
-                        await switchChainAsync({ chainId: activeChain.id });
-                      } catch {
-                        return;
-                      }
-                    }
-
-                    // The bitmap is up to 15s stale, so between polls this Form
-                    // may already be gone. One cheap read beats asking the user
-                    // to sign something that is guaranteed to revert.
-                    setChecking(true);
-                    let free = true;
-                    try {
-                      free = (await readContract(wagmiConfig, {
-                        address: CONTRACT_ADDRESS,
-                        abi: CSE_ABI,
-                        functionName: "isAvailable",
-                        args: [BigInt(id)],
-                        chainId: activeChain.id,
-                      })) as boolean;
-                    } catch {
-                      // If the read itself fails, fall through and let the
-                      // transaction be the judge — AlreadyMinted still catches it.
-                    } finally {
-                      setChecking(false);
-                    }
-                    if (!free) {
-                      setTaken(id);
-                      refetchMinted();
-                      solveAgain();
-                      return;
-                    }
-
-                    writeContract({
-                      address: CONTRACT_ADDRESS,
-                      abi: CSE_ABI,
-                      functionName: "mint",
-                      args: [[BigInt(id)]],
-                      value: price,
-                      chainId: activeChain.id,
-                    });
-                  }}
-                >
+                <button className="primary" style={{ width: "100%", marginTop: 12 }} disabled={!canMint || busy} onClick={mint}>
                   {soldOut
                     ? "Sold out"
                     : walletRemaining === 0
                       ? "Wallet limit reached"
                       : shortOfFunds
                         ? "Not enough ETH"
-                        : checking
-                        ? "Checking…"
-                        : switching
-                        ? `Switching to ${activeChain.name}…`
-                        : wrongChain
-                          ? `Switch to ${activeChain.name} & mint`
-                          : isPending
-                            ? "Confirm in wallet…"
-                            : confirming
-                              ? "Minting…"
-                              : `Mint #${pad(id)} · ${formatEther(price)} ETH`}
+                        : phase === "checking"
+                          ? "Checking…"
+                          : phase === "approving"
+                            ? "Approving…"
+                            : switching
+                              ? `Switching to ${activeChain.name}…`
+                              : wrongChain
+                                ? `Switch to ${activeChain.name} & mint`
+                                : phase === "minting" && !confirming
+                                  ? "Confirm in wallet…"
+                                  : confirming
+                                    ? "Minting…"
+                                    : `Mint this one · ${formatEther(price)} ETH`}
                 </button>
-                <div
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    marginTop: 8,
-                    fontSize: 11,
-                    color: "var(--ink-faint)",
-                  }}
-                >
+                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8, fontSize: 11, color: "var(--ink-faint)" }}>
                   <span>{address ? short(address) : ""}</span>
-                  <button
-                    style={{ border: 0, padding: 0, fontSize: 10 }}
-                    onClick={() => disconnect()}
-                  >
+                  <button style={{ border: 0, padding: 0, fontSize: 10 }} onClick={() => disconnect()}>
                     Disconnect
                   </button>
                 </div>
@@ -356,34 +370,24 @@ export function MintBox() {
 
             {wrongChain && (
               <div className="status warn">
-                Your wallet is on chain {walletChainId}. This collection lives on{" "}
-                {activeChain.name} ({activeChain.id}). Minting will switch it for you.
+                Your wallet is on chain {walletChainId}. This collection lives on {activeChain.name} ({activeChain.id}).
+                Minting will switch it for you.
               </div>
             )}
-
             {shortOfFunds && !friendly && (
               <div className="status warn">
-                Not enough ETH. You have {formatEther(balance!.value).slice(0, 8)}{" "}
-                {balance!.symbol}; this costs {formatEther(price)} plus gas.
+                Not enough ETH. You have {formatEther(balance!.value).slice(0, 8)} {balance!.symbol}; this costs{" "}
+                {formatEther(price)} plus gas.
               </div>
             )}
-
-            {taken !== null && !isSuccess && (
-              <div className="status warn">
-                <strong>Someone took #{pad(taken)} first</strong>
-                <div className="status-detail">
-                  Nothing was sent. Here is another nobody has taken.
-                </div>
-              </div>
-            )}
-
-            {isSuccess && (
+            {note && <div className="status warn">{note}</div>}
+            {isSuccess && mintedId && (
               <div className="status ok">
-                Minted. Find it in <a href="/output">output</a>.
+                Minted #{pad(mintedId)}. Find it in <a href="/output">output</a>, or load it in the{" "}
+                <a href="/">lab</a>.
               </div>
             )}
-
-            {friendly && (
+            {friendly && !note && (
               <div className={`status ${friendly.benign ? "warn" : "err"}`}>
                 <strong>{friendly.title}</strong>
                 {friendly.detail && <div className="status-detail">{friendly.detail}</div>}
@@ -392,6 +396,7 @@ export function MintBox() {
           </div>
         )}
       </div>
+      <ConnectModal open={picking} onClose={() => setPicking(false)} />
     </div>
   );
 }

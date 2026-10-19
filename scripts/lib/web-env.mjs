@@ -17,8 +17,10 @@ const OPTIONAL = new Set([
   "RPC_URL",
   "ALCHEMY_API_KEY",
   "ALCHEMY_NETWORK",
+  "SIGNER_PRIVATE_KEY",
   "NEXT_PUBLIC_IMAGES_CID",
   "NEXT_PUBLIC_ART_CID",
+  "NEXT_PUBLIC_COVERS_BASE",
 ]);
 
 /**
@@ -28,8 +30,10 @@ const OPTIONAL = new Set([
  * @param {string} [o.masterSeed]
  * @param {string} [o.rpcUrl]        browser-visible RPC; only for anvil
  * @param {string} [o.localAssets]   local static server; only for anvil
+ * @param {string} [o.signerKey]     the approver's private key; server-only
  * @param {string} [o.alchemyKey]
  * @param {string} [o.alchemyNetwork]
+ * @param {string} [o.coversBase]   cover stills on Vercel Blob; the renderer's imageBase
  * @param {string} [o.imagesCid]
  * @param {string} [o.artCid]
  * @param {string} [o.gateway]
@@ -74,7 +78,18 @@ export function buildWebEnv(o) {
       note: local ? "not needed against anvil" : "must match NEXT_PUBLIC_CHAIN_ID",
     },
 
+    {
+      key: "SIGNER_PRIVATE_KEY",
+      value: o.signerKey ?? "",
+      note: "server-only. Signs mint approvals; its address is the contract's `signer`",
+    },
+
     // Assets
+    {
+      key: "NEXT_PUBLIC_COVERS_BASE",
+      value: o.coversBase ?? "",
+      note: "from out/collection/covers.json; wins over the IPFS CID below",
+    },
     {
       key: "NEXT_PUBLIC_IMAGES_CID",
       value: o.imagesCid ?? "",

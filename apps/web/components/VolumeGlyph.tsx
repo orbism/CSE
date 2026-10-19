@@ -24,12 +24,13 @@ export function VolumeGlyph() {
     const draw = () => {
       const dpr = window.devicePixelRatio || 1;
       const W = 30,
-        H = 20;
-      if (canvas.width !== W * dpr) {
-        canvas.width = W * dpr;
-        canvas.height = H * dpr;
+        H = 20,
+        S = 1.3; // drawn at the original 30x20, shown at 39x26
+      if (canvas.width !== W * S * dpr) {
+        canvas.width = W * S * dpr;
+        canvas.height = H * S * dpr;
       }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.setTransform(dpr * S, 0, 0, dpr * S, 0, 0);
       ctx.clearRect(0, 0, W, H);
 
       // how loud the music is right now, 0..1

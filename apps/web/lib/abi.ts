@@ -1,133 +1,54 @@
+import { parseAbi } from "viem";
+
 /**
- * Only the surface the site actually touches — plus every custom error.
- *
- * The error entries are not optional decoration: without them viem cannot
- * decode a revert, and a failed mint surfaced as "the contract function
- * reverted with the following reason:" followed by nothing at all.
+ * Only the surface the site actually touches, plus every custom error: without
+ * the errors viem cannot decode a revert, and a failed mint surfaced as "the
+ * contract function reverted" followed by nothing at all.
  */
-export const CSE_ABI = [
-  { type: "error", name: "MintNotLive", inputs: [] },
-  { type: "error", name: "SupplyExhausted", inputs: [] },
-  { type: "error", name: "WalletLimitExceeded", inputs: [] },
-  { type: "error", name: "IncorrectPayment", inputs: [] },
-  { type: "error", name: "InvalidQuantity", inputs: [] },
-  { type: "error", name: "ReserveExhausted", inputs: [] },
-  { type: "error", name: "NothingToWithdraw", inputs: [] },
-  { type: "error", name: "WithdrawFailed", inputs: [] },
-  { type: "error", name: "ZeroAddress", inputs: [] },
-  { type: "error", name: "InvalidTokenId", inputs: [] },
-  { type: "error", name: "AlreadyMinted", inputs: [{ name: "tokenId", type: "uint256" }] },
-  // inherited from OpenZeppelin, reachable through this ABI
-  {
-    type: "error",
-    name: "ERC721NonexistentToken",
-    inputs: [{ name: "tokenId", type: "uint256" }],
-  },
-  {
-    type: "error",
-    name: "OwnableUnauthorizedAccount",
-    inputs: [{ name: "account", type: "address" }],
-  },
-  {
-    type: "function",
-    name: "mint",
-    stateMutability: "payable",
-    inputs: [{ name: "tokenIds", type: "uint256[]" }],
-    outputs: [],
-  },
-  {
-    type: "function",
-    name: "mintedBitmap",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint256[]" }],
-  },
-  {
-    type: "function",
-    name: "isAvailable",
-    stateMutability: "view",
-    inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ type: "bool" }],
-  },
-  {
-    type: "function",
-    name: "mintState",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint8" }],
-  },
-  {
-    type: "function",
-    name: "price",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "totalSupply",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "remainingPublic",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "mintedBy",
-    stateMutability: "view",
-    inputs: [{ name: "", type: "address" }],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "MAX_SUPPLY",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "MAX_PER_WALLET",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "uint256" }],
-  },
-  {
-    type: "function",
-    name: "ownerOf",
-    stateMutability: "view",
-    inputs: [{ name: "tokenId", type: "uint256" }],
-    outputs: [{ type: "address" }],
-  },
-  {
-    type: "function",
-    name: "provenanceHash",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "bytes32" }],
-  },
-  {
-    type: "function",
-    name: "masterSeed",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "string" }],
-  },
-  {
-    type: "function",
-    name: "metadataFrozen",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [{ type: "bool" }],
-  },
-  { type: "error", name: "MetadataAlreadyFrozen", inputs: [] },
-] as const;
+export const CSE_ABI = parseAbi([
+  "error MintNotLive()",
+  "error SupplyExhausted()",
+  "error WalletLimitExceeded()",
+  "error IncorrectPayment()",
+  "error InvalidQuantity()",
+  "error ReserveExhausted()",
+  "error NothingToWithdraw()",
+  "error WithdrawFailed()",
+  "error ZeroAddress()",
+  "error SeedTaken(bytes32 seed)",
+  "error ApprovalExpired()",
+  "error BadSignature()",
+  "error MetadataAlreadyFrozen()",
+  "event Minted(uint256 indexed tokenId, bytes32 indexed seed, address indexed to)",
+  "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
+  "function mint(bytes32 seed, uint256 deadline, bytes signature) payable",
+  "function mintState() view returns (uint8)",
+  "function price() view returns (uint256)",
+  "function totalSupply() view returns (uint256)",
+  "function totalMinted() view returns (uint256)",
+  "function remainingPublic() view returns (uint256)",
+  "function MAX_SUPPLY() view returns (uint256)",
+  "function MAX_PER_WALLET() view returns (uint256)",
+  "function mintedBy(address) view returns (uint256)",
+  "function seedOf(uint256 tokenId) view returns (bytes32)",
+  "function tokenOfSeed(bytes32 seed) view returns (uint256)",
+  "function ownerOf(uint256 tokenId) view returns (address)",
+  "function renderer() view returns (address)",
+  "function signer() view returns (address)",
+  "function mintDigest(address minter, bytes32 seed, uint256 deadline) view returns (bytes32)",
+]);
 
 export const MINT_STATE = ["CLOSED", "LIVE", "SOLD_OUT"] as const;
 export type MintState = (typeof MINT_STATE)[number];
+
+/** EIP-712 shape of a mint approval; must match the contract's MINT_TYPEHASH and domain. */
+export const MINT_TYPES = {
+  Mint: [
+    { name: "minter", type: "address" },
+    { name: "seed", type: "bytes32" },
+    { name: "deadline", type: "uint256" },
+  ],
+} as const;
+
+export const mintDomain = (chainId: number, verifyingContract: `0x${string}`) =>
+  ({ name: "Cubic Symmetry Engine", version: "1", chainId, verifyingContract }) as const;

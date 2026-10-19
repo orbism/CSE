@@ -21,6 +21,7 @@ const SORTS = [
   "Minted ↓",
 ] as const;
 const PER_PAGE = [12, 24, 60, 120, 240] as const;
+const rank = (r: TokenRow) => r.rarityRank ?? Number.MAX_SAFE_INTEGER;
 
 const ANY = "";
 
@@ -87,11 +88,13 @@ export function Gallery() {
       case "Token ↓":
         out.sort((a, b) => b.tokenId - a.tokenId);
         break;
+      // Rarity exists only after the sell-out reveal; until then every row is
+      // unranked and these fall back to id order.
       case "Rarest":
-        out.sort((a, b) => a.rarityRank - b.rarityRank);
+        out.sort((a, b) => rank(a) - rank(b) || a.tokenId - b.tokenId);
         break;
       case "Commonest":
-        out.sort((a, b) => b.rarityRank - a.rarityRank);
+        out.sort((a, b) => (a.rarityRank === undefined ? 1 : 0) - (b.rarityRank === undefined ? 1 : 0) || rank(b) - rank(a) || a.tokenId - b.tokenId);
         break;
       // Unminted ids have no date at all, so they collect at the end of both
       // directions rather than pretending to be the oldest or the newest.

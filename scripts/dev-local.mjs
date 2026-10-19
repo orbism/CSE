@@ -11,7 +11,8 @@
  */
 
 import { spawn } from "node:child_process";
-import { access, readFile, readdir, writeFile } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { access, readFile, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { loadRootEnv } from "./lib/env.mjs";
@@ -26,7 +27,7 @@ import {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CONTRACTS = join(ROOT, "packages/contracts");
 const WEB = join(ROOT, "apps/web");
-const COLLECTION = join(ROOT, "out/collection");
+const COVERS = join(ROOT, "out/local-covers");
 
 // anvil's first well-known development account
 const DEPLOYER_PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80";
@@ -148,8 +149,8 @@ function run(cmd, args, opts = {}) {
 
 await loadRootEnv();
 
-// Resolve the asset port before anything embeds it: the metadata rewrite below
-// bakes this into every tokenURI, so it has to be settled first.
+// Resolve the asset port before anything embeds it: the cover base goes into
+// the site's env, so it has to be settled first.
 const wantedAssetPort = ASSET_PORT;
 ASSET_PORT = await freePort(ASSET_PORT);
 if (ASSET_PORT !== wantedAssetPort) {
@@ -187,82 +188,12 @@ if (!(await exists(join(ROOT, "packages/art/dist/index.html")))) {
   console.log("no art bundle — building it…");
   await runVisible("pnpm", ["--filter", "@cse/art", "build"], { cwd: ROOT });
 }
-
-/** The smallest id set that includes every archetype, straight from the maths. */
-async function coveringIds() {
-  const out = await run("pnpm", ["--silent", "--filter", "@cse/generator", "cover"], { cwd: ROOT });
-  // pnpm prints its own banner even with --silent; the ids are the last line
-  const line = out.trim().split("\n").at(-1).trim();
-  if (!/^\d+(,\d+)*$/.test(line)) throw new Error(`could not read the covering ids from: ${line}`);
-  return line.split(",").map(Number);
+// The engine page the renderer carries on chain, so local tokenURIs are the real thing.
+const ONCHAIN = join(ROOT, "out/onchain");
+if (!(await exists(join(ONCHAIN, "page-tail.b64")))) {
+  console.log("no on-chain page — packing it…");
+  await runVisible("pnpm", ["--filter", "@cse/generator", "onchain"], { cwd: ROOT });
 }
-
-let demoIds = [];
-if (!(await exists(join(COLLECTION, "tokens.json")))) {
-  // One token per form, plus however many extra the caller asked for. Generating
-  // a 1..n prefix instead would miss the scarce forms entirely — the rarest sit
-  // past id 200, and the whole point of the demo is seeing all of them.
-  const cover = await coveringIds();
-  // CSE_DEV_TOKENS is now a count of *extra* tokens on top of the cover, not the
-  // whole preview size — the cover is not optional.
-  const extra = Number(process.env.CSE_DEV_TOKENS ?? 0);
-  const seen = new Set(cover);
-  for (let id = 1; seen.size < cover.length + extra && id <= 512; id++) seen.add(id);
-  demoIds = [...seen].sort((a, b) => a - b);
-  const size = Number(process.env.CSE_DEV_SIZE ?? 900);
-  console.log(
-    `no collection yet — generating ${demoIds.length} tokens at ${size}px, ` +
-      `one for every form.\n` +
-      `(this is only for the local demo; the real run is \`pnpm generate\`)`,
-  );
-  // playwright's chromium is required to render; say so plainly if it is absent
-  try {
-    await runVisible(
-      "pnpm",
-      [
-        "--filter",
-        "@cse/generator",
-        "generate",
-        "--",
-        "--ids",
-        demoIds.join(","),
-        "--size",
-        String(size),
-      ],
-      { cwd: ROOT },
-    );
-  } catch (e) {
-    console.error(
-      `\nGeneration failed: ${e.message}\n` +
-        `If chromium is missing, install it with:\n` +
-        `  pnpm --filter @cse/generator exec playwright install chromium\n`,
-    );
-    process.exit(1);
-  }
-}
-
-// ── 0. point the metadata at the local asset server ──────────────────────────
-// The generator writes ipfs://PENDING_* placeholders that only the upload step
-// fills in. Rewriting them here means tokenURI resolves to something that
-// actually loads, so the loop exercises the same path a marketplace would.
-
-const assetBase = `http://127.0.0.1:${ASSET_PORT}`;
-const metadataDir = join(COLLECTION, "metadata");
-let rewrote = 0;
-for (const name of (await readdir(metadataDir)).filter((n) => n.endsWith(".json"))) {
-  const path = join(metadataDir, name);
-  const text = await readFile(path, "utf8");
-  const next = text
-    .replace(/ipfs:\/\/PENDING_IMAGES_CID/g, `${assetBase}/images`)
-    .replace(/ipfs:\/\/PENDING_ART_CID/g, `${assetBase}/art`)
-    // re-point a previous local run in case the port changed
-    .replace(/http:\/\/127\.0\.0\.1:\d+\/(images|art)/g, `${assetBase}/$1`);
-  if (next !== text) {
-    await writeFile(path, next);
-    rewrote++;
-  }
-}
-if (rewrote) console.log(`rewrote ${rewrote} metadata files to ${assetBase}`);
 
 // ── 1. anvil ─────────────────────────────────────────────────────────────────
 
@@ -298,19 +229,10 @@ if (runningChain === 31337) {
 // ── 2. deploy ────────────────────────────────────────────────────────────────
 
 console.log("deploying…");
-const baseURI = `http://127.0.0.1:${ASSET_PORT}/metadata/`;
+const coversBase = `http://127.0.0.1:${ASSET_PORT}/covers/`;
 
-// The local collection is a 22-token cover, so its provenance hash is honestly
-// marked incomplete. Pass it anyway — the local loop should exercise the same
-// initialisation path as a real deploy, and `pnpm deploy` is what refuses an
-// incomplete hash on a live network.
-let devProvenance = null;
-try {
-  devProvenance = JSON.parse(await readFile(join(COLLECTION, "provenance.json"), "utf8"));
-} catch {
-  // a collection generated before provenance existed; the default is fine
-}
-
+// The deployer is owner and approver here; the site signs with the same anvil
+// key (SIGNER_PRIVATE_KEY below), which is the whole local loop in one account.
 const deployOut = await run(
   "forge",
   ["script", "script/Deploy.s.sol:Deploy", "--rpc-url", RPC, "--broadcast", "-vv"],
@@ -320,11 +242,10 @@ const deployOut = await run(
       ...process.env,
       PRIVATE_KEY: DEPLOYER_PK,
       CSE_OWNER: DEPLOYER,
-      CSE_BASE_URI: baseURI,
       CSE_PRICE_WEI: "5000000000000000",
-      ...(devProvenance
-        ? { CSE_PROVENANCE: devProvenance.hash, CSE_MASTER_SEED: devProvenance.masterSeed }
-        : {}),
+      CSE_SIGNER: DEPLOYER,
+      CSE_ONCHAIN_DIR: ONCHAIN,
+      CSE_IMAGE_BASE: coversBase,
     },
   },
 );
@@ -344,61 +265,56 @@ async function setMintState(state) {
   });
 }
 
-// ── 2a. mint one Form per archetype ──────────────────────────────────────────
-// Every form should be visible in the gallery the moment the site comes up,
-// rather than sitting unminted behind the mint panel. The ids come from the
-// generated collection, so this stays correct if the maths moves.
-
-const mintIds = await (async () => {
-  try {
-    const map = JSON.parse(await readFile(join(COLLECTION, "coverage.json"), "utf8"));
-    return [...new Set(Object.values(map))].sort((a, b) => a - b);
-  } catch {
-    return demoIds;
-  }
-})();
-
-if (mintIds.length) {
-  // Minting needs LIVE. `dev:closed` gets it flipped back afterwards, which is
-  // the more interesting demo anyway: the panel browses a collection that is
-  // already partly taken.
+// ── 2a. mint a handful of Forms ──────────────────────────────────────────────
+// So the gallery has something in it the moment the site comes up. Each mint
+// goes through the real path: a random seed, an EIP-712 approval signed for the
+// minter (by the deployer, who is the approver locally), then `mint`.
+const DEMO_MINTS = Number(process.env.CSE_DEV_TOKENS ?? 12);
+if (DEMO_MINTS > 0) {
   await setMintState(1);
-  const PER_WALLET = 20;
-  // anvil's first three well-known accounts; the cover exceeds one wallet's cap
-  const WALLETS = [
-    DEPLOYER_PK,
-    "0x59c6995e998f97a5a0044966f0945389dc9e86dae88c7a8412f4603b6b78690d",
-    "0x5de4111afa1a4b94908f83103eb1f1706367c2e68ca870fc3fb9a804cdab365a",
-  ];
-  const PRICE_WEI = 5000000000000000n;
-  let minted = 0;
-  for (let i = 0; i * PER_WALLET < mintIds.length; i++) {
-    const chunk = mintIds.slice(i * PER_WALLET, (i + 1) * PER_WALLET);
-    if (i >= WALLETS.length) {
-      console.error(`too many Forms to mint with ${WALLETS.length} wallets — skipping the rest`);
-      break;
-    }
+  const chainId = 31337;
+  const typed = (minter, seed, deadline) =>
+    JSON.stringify({
+      types: {
+        EIP712Domain: [
+          { name: "name", type: "string" },
+          { name: "version", type: "string" },
+          { name: "chainId", type: "uint256" },
+          { name: "verifyingContract", type: "address" },
+        ],
+        Mint: [
+          { name: "minter", type: "address" },
+          { name: "seed", type: "bytes32" },
+          { name: "deadline", type: "uint256" },
+        ],
+      },
+      primaryType: "Mint",
+      domain: { name: "Cubic Symmetry Engine", version: "1", chainId, verifyingContract: proxy },
+      message: { minter, seed, deadline: String(deadline) },
+    });
+  for (let i = 0; i < DEMO_MINTS; i++) {
+    const seed = `0x${randomBytes(32).toString("hex")}`;
+    const deadline = Math.floor(Date.now() / 1000) + 600;
+    const sig = (
+      await run("cast", ["wallet", "sign", "--private-key", DEPLOYER_PK, "--data", typed(DEPLOYER, seed, deadline)])
+    ).trim();
     await run(
       "cast",
-      [
-        "send",
-        proxy,
-        "mint(uint256[])",
-        `[${chunk.join(",")}]`,
-        "--value",
-        String(PRICE_WEI * BigInt(chunk.length)),
-        "--private-key",
-        WALLETS[i],
-        "--rpc-url",
-        RPC,
-      ],
+      ["send", proxy, "mint(bytes32,uint256,bytes)", seed, String(deadline), sig, "--value", "5000000000000000",
+        "--private-key", DEPLOYER_PK, "--rpc-url", RPC],
       { cwd: CONTRACTS },
     );
-    minted += chunk.length;
   }
-  console.log(`minted ${minted} Forms — one of every archetype`);
-}
+  console.log(`minted ${DEMO_MINTS} Forms from random seeds`);
 
+  // covers + fingerprints, the way the watcher does it in production
+  console.log("rendering covers…");
+  await runVisible(
+    "pnpm",
+    ["--filter", "@cse/generator", "watch-mints", "--", "--contract", proxy, "--rpc", RPC, "--once", "--local", COVERS, "--size", "600"],
+    { cwd: ROOT },
+  );
+}
 await setMintState(WANT_LIVE ? 1 : 0);
 console.log(`mint state -> ${WANT_LIVE ? "LIVE" : "CLOSED"}`);
 
@@ -413,6 +329,8 @@ const envEntries = buildWebEnv({
   masterSeed: process.env.CSE_MASTER_SEED,
   rpcUrl: RPC,
   localAssets: `http://127.0.0.1:${ASSET_PORT}`,
+  signerKey: DEPLOYER_PK,
+  coversBase,
 });
 
 const existing = await readFile(envPath, "utf8").catch(() => "");
@@ -434,7 +352,7 @@ envBlock = renderEnvBlock(envEntries);
 // ── 4. assets + site ─────────────────────────────────────────────────────────
 
 start("assets", process.execPath, [join(ROOT, "scripts/serve-assets.mjs")], {
-  env: { ...process.env, CSE_ASSET_PORT: String(ASSET_PORT) },
+  env: { ...process.env, CSE_ASSET_PORT: String(ASSET_PORT), CSE_COVERS_DIR: COVERS },
 });
 start("next", "pnpm", ["--filter", "@cse/web", "dev"], {
   cwd: ROOT,
@@ -468,6 +386,8 @@ apps/web/.env.local  — already written; copy/paste if you keep your own:
 ${envBlock}
 
 ${RULE}
+  rolls on the input page are approved by this same key (SIGNER_PRIVATE_KEY in
+  .env.local); covers come from out/local-covers, rendered at mint by the watcher.
   flip the mint on later with:
   CSE_PROXY=${proxy} CSE_MINT_STATE=1 PRIVATE_KEY=${DEPLOYER_PK} \\
     forge script script/Admin.s.sol:SetMintState --rpc-url ${RPC} --broadcast

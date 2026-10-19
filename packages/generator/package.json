@@ -13,11 +13,16 @@
     "variety": "tsx src/variety.ts",
     "upload": "tsx src/upload-cli.ts",
     "forms": "tsx src/forms.ts",
-    "compare": "tsx src/compare-engines.ts"
+    "compare": "tsx src/compare-engines.ts",
+    "onchain": "tsx src/onchain.ts",
+    "reveal": "tsx src/reveal.ts",
+    "watch-mints": "tsx src/watch-mints.ts",
+    "onchain-check": "tsx src/onchain-check.ts"
   },
   "dependencies": {
-    "@cse/core": "workspace:*",
     "@aws-sdk/client-s3": "^3.658.0",
+    "@cse/core": "workspace:*",
+    "@vercel/blob": "^2.8.2",
     "playwright": "^1.47.2",
     "viem": "^2.21.19"
   },

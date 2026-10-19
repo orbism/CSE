@@ -15,7 +15,7 @@
  */
 
 import * as THREE from "three";
-import { deriveToken } from "@cse/core";
+import { tokenFromSeed } from "@cse/core";
 import * as GL from "../gl/index.js";
 import { buildPiece, disposePiece } from "../scene.js";
 import type { FormRef } from "./genome.js";
@@ -24,8 +24,8 @@ import type { FormRef } from "./genome.js";
 const MAX_PARTICLES = 1500;
 const STRUT = 0.025;
 
-export function formGeometry(master: string, ref: FormRef): THREE.BufferGeometry {
-  const piece = buildPiece(deriveToken(master, ref.id, ref.nonce));
+export function formGeometry(ref: FormRef): THREE.BufferGeometry {
+  const piece = buildPiece(tokenFromSeed(ref.seed, ref.id));
   piece.scene.updateMatrixWorld();
   const out: number[] = [];
   const a = new GL.Vector3(),

@@ -28,6 +28,8 @@ export const IPFS_GATEWAY =
 export const IMAGES_CID = process.env.NEXT_PUBLIC_IMAGES_CID ?? "";
 export const ART_CID = process.env.NEXT_PUBLIC_ART_CID ?? "";
 export const LOCAL_ASSETS = process.env.NEXT_PUBLIC_LOCAL_ASSETS ?? "";
+/** Where the cover stills live (`<base><id>.png`): the Vercel Blob store, as the renderer's imageBase. */
+export const COVERS_BASE = process.env.NEXT_PUBLIC_COVERS_BASE ?? "";
 
 export const activeChain =
   CHAIN_ID === mainnet.id ? mainnet : CHAIN_ID === sepolia.id ? sepolia : anvil;
@@ -82,6 +84,7 @@ declare module "wagmi" {
  * anvil loop works with no CIDs and no gateway.
  */
 export function imageUrl(tokenId: number): string {
+  if (COVERS_BASE) return `${COVERS_BASE}${tokenId}.png`;
   if (IMAGES_CID) return `${IPFS_GATEWAY}/${IMAGES_CID}/${tokenId}.png`;
   if (LOCAL_ASSETS) return `${LOCAL_ASSETS}/images/${tokenId}.png`;
   return "";
@@ -111,8 +114,3 @@ export function tokensIndexUrl(): string {
   return "/tokens.json";
 }
 
-/** The published provenance commitment, for checking against the chain. */
-export function provenanceUrl(): string {
-  if (LOCAL_ASSETS) return `${LOCAL_ASSETS}/provenance.json`;
-  return "/provenance.json";
-}

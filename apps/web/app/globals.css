@@ -66,7 +66,7 @@
 
   --gutter: clamp(16px, 3vw, 40px);
   /* Height of the radio strip pinned to the bottom of every page. */
-  --radio-h: 32px;
+  --radio-h: 44px;
 }
 
 [data-theme="amber"] {
@@ -185,11 +185,11 @@ html[data-theme="prism"] .lab-win:nth-of-type(3n) .lab-win-head .mono-label {
   color: var(--accent-3);
 }
 
-html[data-theme="prism"] .nav span:nth-child(3n + 2) a.on {
+html[data-theme="prism"] .nav a:nth-of-type(3n + 2).on {
   color: var(--accent-2);
 }
 
-html[data-theme="prism"] .nav span:nth-child(3n) a.on {
+html[data-theme="prism"] .nav a:nth-of-type(3n).on {
   color: var(--accent-3);
 }
 
@@ -337,11 +337,14 @@ h2 {
   background: transparent;
 }
 
+/* Each cell is as wide as its longest word, with the same padding all round,
+   so a label retyping itself never shifts its neighbours. */
 .nav {
+  position: relative;
   display: flex;
   align-items: baseline;
-  gap: 0;
   margin-top: 12px;
+  padding-bottom: 5px;
   font-family: var(--display);
   font-size: 14.5px;
   letter-spacing: 0.16em;
@@ -349,9 +352,14 @@ h2 {
 }
 
 .nav a {
+  position: relative;
+  display: block;
+  padding: 2px 10px;
+  text-align: center;
+  white-space: nowrap;
   color: var(--ink-faint);
   border: 0;
-  padding: 2px 0;
+  transition: color 0.25s;
 }
 
 .nav a:hover {
@@ -361,11 +369,141 @@ h2 {
 
 .nav a.on {
   color: var(--accent);
+  animation: crt-ink 37s linear infinite;
+}
+
+/* mid-retype: a flash of the second colour, and the cursor doing the work */
+.nav a.typing {
+  color: var(--accent-2);
+}
+
+.nav a.on.typing {
+  color: var(--ink);
 }
 
 .nav-sep {
   color: var(--line-bright);
-  padding: 0 12px;
+  padding: 0 2px;
+}
+
+/* the longest word holds the width; the live text sits over it */
+.nav-sizer {
+  visibility: hidden;
+}
+
+.nav-text {
+  position: absolute;
+  inset: 2px 0;
+}
+
+.nav-cursor {
+  display: inline-block;
+  margin-left: 1px;
+  color: var(--accent);
+  text-shadow: var(--glow);
+  animation: nav-blink 0.5s steps(2) infinite;
+}
+
+/* The one underline. It travels to whatever the pointer is on and settles
+   back under the active item, overshooting a touch and thinning as it goes. */
+.nav-line {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0.42;
+  transform-origin: center;
+  transition:
+    left 0.55s cubic-bezier(0.3, 1.25, 0.45, 1),
+    width 0.55s cubic-bezier(0.3, 1.25, 0.45, 1),
+    transform 0.28s ease-in-out;
+  animation: crt-line 29s linear infinite;
+  pointer-events: none;
+}
+
+.nav-line.moving {
+  transform: scaleX(0.4);
+}
+
+/* Tube dimming: long, irregular, so the loop is hard to spot. */
+@keyframes crt-ink {
+  0%, 2.9%, 3.3%, 11%, 11.3%, 23%, 23.1%, 23.5%, 38%, 38.2%, 52%, 52.5%, 66%, 66.1%, 79%, 79.4%, 88%, 88.1%, 100% { opacity: 1; }
+  3.1% { opacity: 0.78; }
+  11.15% { opacity: 0.86; }
+  23.05%, 23.3% { opacity: 0.7; }
+  38.1% { opacity: 0.9; }
+  52.2% { opacity: 0.82; }
+  66.05% { opacity: 0.74; }
+  79.2% { opacity: 0.88; }
+  88.05% { opacity: 0.8; }
+}
+
+@keyframes crt-line {
+  0%, 4%, 4.6%, 13%, 13.1%, 13.4%, 27%, 27.3%, 41%, 41.1%, 56%, 56.4%, 69%, 69.1%, 83%, 83.5%, 94%, 94.1%, 100% { opacity: 0.42; }
+  4.3% { opacity: 0.2; }
+  13.05%, 13.25% { opacity: 0.12; }
+  27.15% { opacity: 0.3; }
+  41.05% { opacity: 0.18; }
+  56.2% { opacity: 0.26; }
+  69.05% { opacity: 0.1; }
+  83.25% { opacity: 0.32; }
+  94.05% { opacity: 0.22; }
+}
+
+@keyframes nav-blink {
+  to { opacity: 0; }
+}
+
+.nav-burger {
+  display: none;
+}
+
+@media (max-width: 760px) {
+  .nav-burger {
+    display: inline-block;
+    margin-top: 10px;
+    min-width: 40px;
+    font-size: 18px;
+    line-height: 1;
+  }
+  .nav {
+    display: none;
+  }
+  .nav.open {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .nav.open a {
+    text-align: left;
+    padding: 6px 4px;
+  }
+  .nav.open .nav-sizer {
+    display: none;
+  }
+  .nav.open .nav-text {
+    position: static;
+  }
+  .nav.open .nav-sep {
+    display: none;
+  }
+  .nav.open a.on {
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+  }
+  .nav-line {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav a.on,
+  .nav-line {
+    animation: none;
+  }
+  .nav-line {
+    transition: none;
+  }
 }
 
 .masthead .sub {
@@ -2804,15 +2942,15 @@ body {
   background: var(--panel);
   border-top: 1px solid var(--line);
   font-family: var(--body);
-  font-size: 12px;
+  font-size: 15px;
   color: var(--ink);
 }
 
 .radio button {
-  height: 24px;
-  min-width: 30px;
-  padding: 0 8px;
-  font-size: 15px;
+  height: 30px;
+  min-width: 38px;
+  padding: 0 9px;
+  font-size: 18px;
   line-height: 1;
   letter-spacing: 0;
   border-color: var(--line);
@@ -2857,8 +2995,8 @@ body {
 }
 
 .radio .radio-mute {
-  width: 34px;
-  height: 22px;
+  width: 44px;
+  height: 28px;
   padding: 0 2px;
   border: 0;
   display: grid;
@@ -2870,7 +3008,7 @@ body {
 }
 
 .radio-volume {
-  width: 72px;
+  width: 100px;
   flex: none;
   padding: 0;
   border: 0;
@@ -3117,4 +3255,49 @@ body {
 
 .lab-win[data-win="export"] .lab-win-head {
   border-bottom-color: color-mix(in srgb, var(--warn) 45%, var(--line));
+}
+
+/* ── mint panel: rolling, surprise cover ───────────────────────────────── */
+
+.mint-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.mint-actions button {
+  flex: 1;
+}
+
+.mint-note {
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin: 10px 0 0;
+}
+
+.mint-stage {
+  position: relative;
+}
+
+/* Surprise me: the piece renders (the fingerprint needs it) but stays unseen. */
+.mint-stage.blind .art-frame {
+  filter: blur(28px) saturate(0.4) brightness(0.5);
+  pointer-events: none;
+  user-select: none;
+}
+
+.mint-blind {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  gap: 6px;
+  text-align: center;
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink);
+  text-shadow: var(--glow);
+  pointer-events: none;
 }

@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import { COLLECTION, deriveToken, tokenSummary } from "@cse/core";
-import { MASTER_SEED } from "@/lib/config";
+import { COLLECTION, tokenFromSeed, tokenSummary } from "@cse/core";
 import type { TokenRow } from "@/lib/tokens";
 import { ArtViewer } from "./ArtViewer";
 import { ExportBar } from "./ExportBar";
@@ -30,10 +29,7 @@ export function TokenModal({
   /** Move by one Form within the current filtered, sorted list. Wraps at both ends. */
   onStep?: (delta: number) => void;
 }) {
-  const token = useMemo(
-    () => deriveToken(MASTER_SEED, row.tokenId, row.nonce ?? 0),
-    [row.tokenId, row.nonce],
-  );
+  const token = useMemo(() => tokenFromSeed(row.seed, row.tokenId), [row.tokenId, row.seed]);
   const summary = useMemo(() => tokenSummary(token), [token]);
   const pad = String(row.tokenId).padStart(4, "0");
 
@@ -167,7 +163,7 @@ export function TokenModal({
               Feedback: summary.traits.feedbackBand,
               Phase: `ω${summary.traits.phase}`,
               Palette: summary.traits.palette,
-              "Rarity Rank": row.rarityRank ? `#${row.rarityRank} / ${COLLECTION.supply}` : "-",
+              "Rarity Rank": row.rarityRank ? `#${row.rarityRank} / ${COLLECTION.supply}` : "at sell-out",
             }).map(([k, v]) => (
               <div className="trait-row" key={k}>
                 <span>{k}</span>

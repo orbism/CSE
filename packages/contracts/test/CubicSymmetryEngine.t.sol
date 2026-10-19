@@ -4,42 +4,58 @@ pragma solidity ^0.8.24;
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
+import {IERC2981} from "@openzeppelin/contracts/interfaces/IERC2981.sol";
+import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {CubicSymmetryEngine} from "../src/CubicSymmetryEngine.sol";
 import {EngineV2} from "./mocks/EngineV2.sol";
 
 contract CubicSymmetryEngineTest is Test {
     CubicSymmetryEngine internal cse;
-
     address internal owner = address(0xA11CE);
     address internal alice = address(0xB0B);
     address internal bob = address(0xCA11);
     address internal royalty = address(0xF00D);
-
+    uint256 internal signerPk = 0x5167;
+    address internal signer;
     uint256 internal constant PRICE = 0.005 ether;
     string internal constant BASE = "ipfs://bafyMetadata/";
-    bytes32 internal constant PROVENANCE = keccak256("canonical id:seed table");
-    string internal constant SEED = "CUBIC-SYMMETRY-ENGINE";
 
     function setUp() public {
+        signer = vm.addr(signerPk);
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
-        bytes memory data = abi.encodeCall(
-            CubicSymmetryEngine.initialize, (owner, PRICE, BASE, royalty, 500, PROVENANCE, SEED)
-        );
+        bytes memory data =
+            abi.encodeCall(CubicSymmetryEngine.initialize, (owner, PRICE, BASE, royalty, 500, signer));
         cse = CubicSymmetryEngine(address(new ERC1967Proxy(address(impl), data)));
-
         vm.deal(alice, 100 ether);
         vm.deal(bob, 100 ether);
     }
 
-    /// ids [from, from+n)
-    function _ids(uint256 from, uint256 n) internal pure returns (uint256[] memory a) {
-        a = new uint256[](n);
-        for (uint256 i = 0; i < n; ++i) a[i] = from + i;
+    // ------------------------------------------------------------- helpers
+
+    function _seed(uint256 n) internal pure returns (bytes32) {
+        return keccak256(abi.encode("seed", n));
     }
 
-    function _one(uint256 id) internal pure returns (uint256[] memory a) {
-        a = new uint256[](1);
-        a[0] = id;
+    function _seeds(uint256 from, uint256 n) internal pure returns (bytes32[] memory a) {
+        a = new bytes32[](n);
+        for (uint256 i = 0; i < n; ++i) a[i] = _seed(from + i);
+    }
+
+    function _sig(uint256 pk, address minter, bytes32 seed, uint256 deadline) internal view returns (bytes memory) {
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(pk, cse.mintDigest(minter, seed, deadline));
+        return abi.encodePacked(r, s, v);
+    }
+
+    function _approve(address minter, bytes32 seed) internal view returns (uint256 deadline, bytes memory sig) {
+        deadline = block.timestamp + 600;
+        sig = _sig(signerPk, minter, seed, deadline);
+    }
+
+    /// Mint `seed` as `who`, with a fresh approval.
+    function _mintAs(address who, bytes32 seed) internal {
+        (uint256 deadline, bytes memory sig) = _approve(who, seed);
+        vm.prank(who);
+        cse.mint{value: PRICE}(seed, deadline, sig);
     }
 
     function _openMint() internal {
@@ -47,269 +63,250 @@ contract CubicSymmetryEngineTest is Test {
         cse.setMintState(CubicSymmetryEngine.MintState.LIVE);
     }
 
-    /// @dev Buys out the whole public allocation. The wallet cap does not divide
-    /// it evenly, so the last buyer takes the remainder rather than a full 20.
-    function _drainPublic(uint160 firstBuyer) internal {
-        uint256 remaining = cse.MAX_SUPPLY() - cse.RESERVE();
-        uint256 next = 1;
-        uint256 i = 0;
-        while (remaining > 0) {
-            uint256 n = remaining < cse.MAX_PER_WALLET() ? remaining : cse.MAX_PER_WALLET();
-            address buyer = address(firstBuyer + uint160(i));
+    /// @dev Buys out the whole public allocation, 20 per wallet, seeds from `firstSeed`.
+    function _drainPublic(uint160 firstBuyer, uint256 firstSeed) internal {
+        uint256 remaining = cse.remainingPublic();
+        uint256 n = firstSeed;
+        for (uint256 w = 0; remaining > 0; ++w) {
+            address buyer = address(firstBuyer + uint160(w));
             vm.deal(buyer, 1 ether);
-            vm.prank(buyer);
-            cse.mint{value: PRICE * n}(_ids(next, n));
-            next += n;
-            remaining -= n;
-            ++i;
+            uint256 take = remaining < cse.MAX_PER_WALLET() ? remaining : cse.MAX_PER_WALLET();
+            for (uint256 i = 0; i < take; ++i) _mintAs(buyer, _seed(n++));
+            remaining -= take;
         }
     }
 
-    // ------------------------------------------------------------ initialisation
+    // ---------------------------------------------------------------- init
 
     function test_initialState() public view {
         assertEq(cse.name(), "Cubic Symmetry Engine");
         assertEq(cse.symbol(), "CSE");
         assertEq(cse.owner(), owner);
+        assertEq(cse.signer(), signer);
         assertEq(cse.price(), PRICE);
         assertEq(cse.MAX_SUPPLY(), 512);
         assertEq(cse.RESERVE(), 11);
         assertEq(cse.MAX_PER_WALLET(), 20);
         assertEq(uint8(cse.mintState()), uint8(CubicSymmetryEngine.MintState.CLOSED));
+        assertEq(cse.totalSupply(), 0);
         assertEq(cse.remainingPublic(), 501);
     }
 
     function test_cannotReinitialize() public {
         vm.expectRevert();
-        cse.initialize(owner, PRICE, BASE, royalty, 500, PROVENANCE, SEED);
+        cse.initialize(owner, PRICE, BASE, royalty, 500, signer);
     }
 
     function test_implementationIsLocked() public {
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
         vm.expectRevert();
-        impl.initialize(owner, PRICE, BASE, royalty, 500, PROVENANCE, SEED);
+        impl.initialize(owner, PRICE, BASE, royalty, 500, signer);
     }
 
-    // -------------------------------------------------------------------- mint
+    function test_initRejectsZeroSigner() public {
+        CubicSymmetryEngine impl = new CubicSymmetryEngine();
+        bytes memory data =
+            abi.encodeCall(CubicSymmetryEngine.initialize, (owner, PRICE, BASE, royalty, 500, address(0)));
+        vm.expectRevert(CubicSymmetryEngine.ZeroAddress.selector);
+        new ERC1967Proxy(address(impl), data);
+    }
+
+    // ---------------------------------------------------------------- mint
 
     function test_mintRevertsWhenClosed() public {
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.MintNotLive.selector);
-        cse.mint{value: PRICE}(_one(1));
+        cse.mint{value: PRICE}(_seed(1), d, s);
     }
 
-    function test_mintSucceedsWhenLive() public {
+    function test_mintWritesSeedAndSequentialId() public {
         _openMint();
-        vm.prank(alice);
-        cse.mint{value: PRICE * 3}(_ids(1, 3));
+        vm.expectEmit(true, true, true, true);
+        emit CubicSymmetryEngine.Minted(1, _seed(1), alice);
+        _mintAs(alice, _seed(1));
+        _mintAs(bob, _seed(2));
 
-        assertEq(cse.balanceOf(alice), 3);
-        assertEq(cse.totalSupply(), 3);
         assertEq(cse.ownerOf(1), alice);
-        assertEq(cse.ownerOf(3), alice);
-        assertEq(cse.mintedBy(alice), 3);
-        assertEq(address(cse).balance, PRICE * 3);
+        assertEq(cse.ownerOf(2), bob);
+        assertEq(cse.seedOf(1), _seed(1));
+        assertEq(cse.tokenOfSeed(_seed(2)), 2);
+        assertEq(cse.totalSupply(), 2);
+        assertEq(cse.mintedBy(alice), 1);
+        assertEq(address(cse).balance, PRICE * 2);
     }
 
-    function test_mintRejectsUnderpayment() public {
+    function test_mintRejectsWrongPayment() public {
         _openMint();
-        vm.prank(alice);
-        vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
-        cse.mint{value: PRICE * 2 - 1}(_ids(1, 2));
-    }
-
-    function test_mintRejectsOverpayment() public {
-        _openMint();
-        vm.prank(alice);
-        vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
-        cse.mint{value: PRICE * 2 + 1}(_ids(1, 2));
-    }
-
-    function test_mintRejectsZeroQuantity() public {
-        _openMint();
-        vm.prank(alice);
-        vm.expectRevert(CubicSymmetryEngine.InvalidQuantity.selector);
-        cse.mint{value: 0}(new uint256[](0));
-    }
-
-    function test_walletCapEnforcedInOneCall() public {
-        _openMint();
-        vm.prank(alice);
-        vm.expectRevert(CubicSymmetryEngine.WalletLimitExceeded.selector);
-        cse.mint{value: PRICE * 21}(_ids(1, 21));
-    }
-
-    function test_walletCapEnforcedAcrossCalls() public {
-        _openMint();
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.startPrank(alice);
-        cse.mint{value: PRICE * 20}(_ids(1, 20));
-        assertEq(cse.balanceOf(alice), 20);
-        vm.expectRevert(CubicSymmetryEngine.WalletLimitExceeded.selector);
-        cse.mint{value: PRICE}(_one(1));
+        vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
+        cse.mint{value: PRICE - 1}(_seed(1), d, s);
+        vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
+        cse.mint{value: PRICE + 1}(_seed(1), d, s);
         vm.stopPrank();
+    }
 
-        // a different wallet is unaffected, on an id alice did not take
+    function test_mintRejectsExpiredApproval() public {
+        _openMint();
+        uint256 deadline = block.timestamp + 10;
+        bytes memory s = _sig(signerPk, alice, _seed(1), deadline);
+        vm.warp(deadline + 1);
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.ApprovalExpired.selector);
+        cse.mint{value: PRICE}(_seed(1), deadline, s);
+    }
+
+    function test_mintRejectsUnapprovedSigner() public {
+        _openMint();
+        uint256 deadline = block.timestamp + 600;
+        bytes memory s = _sig(0xBAD, alice, _seed(1), deadline);
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.BadSignature.selector);
+        cse.mint{value: PRICE}(_seed(1), deadline, s);
+    }
+
+    /// An approval names its minter: a roll seen in the mempool is useless to anyone else.
+    function test_approvalCannotBeSniped() public {
+        _openMint();
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.prank(bob);
-        cse.mint{value: PRICE}(_one(21));
-        assertEq(cse.balanceOf(bob), 1);
-        assertEq(cse.ownerOf(21), bob);
+        vm.expectRevert(CubicSymmetryEngine.BadSignature.selector);
+        cse.mint{value: PRICE}(_seed(1), d, s);
+    }
+
+    function test_approvalBindsTheSeed() public {
+        _openMint();
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.BadSignature.selector);
+        cse.mint{value: PRICE}(_seed(2), d, s);
+    }
+
+    function test_seedMintsOnce() public {
+        _openMint();
+        _mintAs(alice, _seed(1));
+        (uint256 d, bytes memory s) = _approve(bob, _seed(1));
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.SeedTaken.selector, _seed(1)));
+        cse.mint{value: PRICE}(_seed(1), d, s);
+    }
+
+    function test_zeroSeedRejected() public {
+        _openMint();
+        (uint256 d, bytes memory s) = _approve(alice, bytes32(0));
+        vm.prank(alice);
+        vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.SeedTaken.selector, bytes32(0)));
+        cse.mint{value: PRICE}(bytes32(0), d, s);
+    }
+
+    function test_walletCapEnforced() public {
+        _openMint();
+        for (uint256 i = 0; i < 20; ++i) _mintAs(alice, _seed(i));
+        assertEq(cse.balanceOf(alice), 20);
+        (uint256 d, bytes memory s) = _approve(alice, _seed(99));
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.WalletLimitExceeded.selector);
+        cse.mint{value: PRICE}(_seed(99), d, s);
     }
 
     function test_publicMintCannotConsumeReserve() public {
         _openMint();
-        // drain the 501 public allocation across many wallets
-        _drainPublic(0x1000);
+        _drainPublic(0x1000, 1000);
         assertEq(cse.totalSupply(), 501);
         assertEq(cse.remainingPublic(), 0);
 
-        address late = address(0xDEAD01);
-        vm.deal(late, 1 ether);
-        vm.prank(late);
+        (uint256 d, bytes memory s) = _approve(alice, _seed(5000));
+        vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.SupplyExhausted.selector);
-        cse.mint{value: PRICE}(_one(502));
+        cse.mint{value: PRICE}(_seed(5000), d, s);
 
-        // the reserve is still claimable and completes the supply
+        // the owner can still claim every reserved piece
         vm.prank(owner);
-        cse.reserveMint(owner, _ids(502, 11));
+        cse.reserveMint(owner, _seeds(9000, 11));
         assertEq(cse.totalSupply(), 512);
-        assertEq(uint8(cse.mintState()), uint8(CubicSymmetryEngine.MintState.SOLD_OUT));
     }
 
     function test_mintFlipsToSoldOutAtCap() public {
         _openMint();
         vm.prank(owner);
-        cse.reserveMint(owner, _ids(502, 11));
-        _drainPublic(0x2000);
+        cse.reserveMint(owner, _seeds(9000, 11));
+        _drainPublic(0x2000, 1000);
         assertEq(cse.totalSupply(), 512);
         assertEq(uint8(cse.mintState()), uint8(CubicSymmetryEngine.MintState.SOLD_OUT));
-
-        address late = address(0xDEAD02);
-        vm.deal(late, 1 ether);
-        vm.prank(late);
-        vm.expectRevert(CubicSymmetryEngine.MintNotLive.selector);
-        cse.mint{value: PRICE}(_one(1));
     }
 
     function test_priceChangeAppliesToNextMint() public {
         _openMint();
         vm.prank(owner);
         cse.setPrice(0.01 ether);
-
-        vm.prank(alice);
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
+        vm.startPrank(alice);
         vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
-        cse.mint{value: PRICE}(_one(1));
-
-        vm.prank(alice);
-        cse.mint{value: 0.01 ether}(_one(1));
-        assertEq(cse.balanceOf(alice), 1);
+        cse.mint{value: PRICE}(_seed(1), d, s);
+        cse.mint{value: 0.01 ether}(_seed(1), d, s);
+        vm.stopPrank();
+        assertEq(cse.ownerOf(1), alice);
     }
 
-    // ------------------------------------------------------- choosing your id
-
-    function test_mintsTheExactIdRequested() public {
+    function test_setSignerRotatesApprovals() public {
         _openMint();
-        uint256[] memory pick = new uint256[](3);
-        (pick[0], pick[1], pick[2]) = (417, 9, 499);
-        vm.prank(alice);
-        cse.mint{value: PRICE * 3}(pick);
+        (uint256 d, bytes memory old) = _approve(alice, _seed(1));
+        uint256 nextPk = 0x7777;
+        vm.prank(owner);
+        cse.setSigner(vm.addr(nextPk));
 
-        assertEq(cse.ownerOf(417), alice);
-        assertEq(cse.ownerOf(9), alice);
-        assertEq(cse.ownerOf(499), alice);
-        assertEq(cse.totalSupply(), 3);
-        // nothing sequential was handed out
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.BadSignature.selector);
+        cse.mint{value: PRICE}(_seed(1), d, old);
+
+        bytes memory fresh = _sig(nextPk, alice, _seed(1), d);
+        vm.prank(alice);
+        cse.mint{value: PRICE}(_seed(1), d, fresh);
+        assertEq(cse.ownerOf(1), alice);
+    }
+
+    function test_setSignerOwnerOnlyAndNonZero() public {
+        vm.prank(alice);
         vm.expectRevert();
-        cse.ownerOf(1);
+        cse.setSigner(alice);
+        vm.prank(owner);
+        vm.expectRevert(CubicSymmetryEngine.ZeroAddress.selector);
+        cse.setSigner(address(0));
     }
 
-    function test_cannotMintATakenId() public {
-        _openMint();
-        vm.prank(alice);
-        cse.mint{value: PRICE}(_one(417));
-
-        vm.prank(bob);
-        vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.AlreadyMinted.selector, 417));
-        cse.mint{value: PRICE}(_one(417));
-    }
-
-    function test_cannotMintTheSameIdTwiceInOneCall() public {
-        _openMint();
-        uint256[] memory dup = new uint256[](2);
-        (dup[0], dup[1]) = (5, 5);
-        vm.prank(alice);
-        vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.AlreadyMinted.selector, 5));
-        cse.mint{value: PRICE * 2}(dup);
-    }
-
-    function test_rejectsOutOfRangeIds() public {
-        _openMint();
-        vm.prank(alice);
-        vm.expectRevert(CubicSymmetryEngine.InvalidTokenId.selector);
-        cse.mint{value: PRICE}(_one(0));
-
-        vm.prank(alice);
-        vm.expectRevert(CubicSymmetryEngine.InvalidTokenId.selector);
-        cse.mint{value: PRICE}(_one(513));
-    }
-
-    function test_isAvailable() public {
-        _openMint();
-        assertTrue(cse.isAvailable(417));
-        vm.prank(alice);
-        cse.mint{value: PRICE}(_one(417));
-        assertFalse(cse.isAvailable(417));
-        assertFalse(cse.isAvailable(0));
-        assertFalse(cse.isAvailable(513));
-    }
-
-    function test_mintedBitmapTracksTakenIds() public {
-        _openMint();
-        uint256[] memory pick = new uint256[](4);
-        (pick[0], pick[1], pick[2], pick[3]) = (1, 256, 257, 512);
-        vm.prank(alice);
-        cse.mint{value: PRICE * 4}(pick);
-
-        uint256[] memory bits = cse.mintedBitmap();
-        assertEq(bits.length, 2); // ceil(512 / 256)
-
-        for (uint256 i = 0; i < pick.length; ++i) {
-            uint256 id = pick[i];
-            assertTrue(bits[(id - 1) >> 8] & (1 << ((id - 1) & 0xff)) != 0, "should be set");
-        }
-        // a neighbour of a taken id stays clear
-        assertTrue(bits[0] & (1 << 1) == 0, "id 2 should be free");
-    }
-
-    // ----------------------------------------------------------------- reserve
+    // -------------------------------------------------------------- reserve
 
     function test_reserveMintOwnerOnly() public {
         vm.prank(alice);
         vm.expectRevert();
-        cse.reserveMint(alice, _one(1));
+        cse.reserveMint(alice, _seeds(1, 1));
     }
 
     function test_reserveCapEnforced() public {
         vm.startPrank(owner);
-        cse.reserveMint(owner, _ids(502, 11));
+        cse.reserveMint(owner, _seeds(9000, 11));
         vm.expectRevert(CubicSymmetryEngine.ReserveExhausted.selector);
-        cse.reserveMint(owner, _one(501));
+        cse.reserveMint(owner, _seeds(9500, 1));
         vm.stopPrank();
         assertEq(cse.totalSupply(), 11);
     }
 
-    function test_reserveMintWorksWhileClosed() public {
+    function test_reserveMintWorksWhileClosedAndRejectsReuse() public {
         vm.prank(owner);
-        cse.reserveMint(alice, _ids(1, 2));
+        cse.reserveMint(alice, _seeds(1, 2));
         assertEq(cse.balanceOf(alice), 2);
         assertEq(uint8(cse.mintState()), uint8(CubicSymmetryEngine.MintState.CLOSED));
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.SeedTaken.selector, _seed(1)));
+        cse.reserveMint(alice, _seeds(1, 1));
     }
 
-    // -------------------------------------------------------------- token URI
+    // ------------------------------------------------------------- metadata
 
-    function test_tokenURI() public {
+    function test_tokenURIFallsBackToBaseURI() public {
         _openMint();
-        vm.prank(alice);
-        cse.mint{value: PRICE}(_one(1));
+        _mintAs(alice, _seed(1));
         assertEq(cse.tokenURI(1), string.concat(BASE, "1.json"));
     }
 
@@ -320,184 +317,110 @@ contract CubicSymmetryEngineTest is Test {
 
     function test_setBaseURI() public {
         _openMint();
-        vm.prank(alice);
-        cse.mint{value: PRICE}(_one(1));
-
+        _mintAs(alice, _seed(1));
         vm.prank(owner);
-        cse.setBaseURI("ipfs://newCID/");
-        assertEq(cse.tokenURI(1), "ipfs://newCID/1.json");
-        assertEq(cse.baseURI(), "ipfs://newCID/");
-    }
-
-    function test_setBaseURIOwnerOnly() public {
+        cse.setBaseURI("ipfs://other/");
+        assertEq(cse.tokenURI(1), "ipfs://other/1.json");
         vm.prank(alice);
         vm.expectRevert();
-        cse.setBaseURI("ipfs://evil/");
+        cse.setBaseURI("x");
     }
 
-    // ------------------------------------------------------------- provenance
-
-    function test_provenanceCommittedAtInit() public view {
-        assertEq(cse.provenanceHash(), PROVENANCE);
-        assertEq(cse.masterSeed(), SEED);
-        assertFalse(cse.metadataFrozen());
-    }
-
-    /// The commitment is worthless if it can be revised, so there is no setter
-    /// at all — not an owner-gated one. This asserts the ABI has no way in.
-    function test_provenanceHasNoSetter() public {
-        assertFalse(_hasSelector(bytes4(keccak256("setProvenanceHash(bytes32)"))));
-        assertFalse(_hasSelector(bytes4(keccak256("setMasterSeed(string)"))));
-        // still the committed value after those calls bounced
-        assertEq(cse.provenanceHash(), PROVENANCE);
-        assertEq(cse.masterSeed(), SEED);
-    }
-
-    function test_freezeMetadataStopsFurtherChanges() public {
-        vm.prank(owner);
-        cse.setBaseURI("ipfs://final/");
-
-        vm.prank(owner);
-        cse.freezeMetadata();
-        assertTrue(cse.metadataFrozen());
-
-        vm.prank(owner);
-        vm.expectRevert(CubicSymmetryEngine.MetadataAlreadyFrozen.selector);
-        cse.setBaseURI("ipfs://afterwards/");
-
-        // and the URI that was frozen is the one that stays
-        assertEq(cse.baseURI(), "ipfs://final/");
-    }
-
-    function test_freezeMetadataOwnerOnly() public {
+    function test_freezeMetadataIsOneWayAndOwnerOnly() public {
         vm.prank(alice);
         vm.expectRevert();
         cse.freezeMetadata();
-    }
-
-    function test_freezeMetadataIsOneWay() public {
         vm.startPrank(owner);
         cse.freezeMetadata();
+        vm.expectRevert(CubicSymmetryEngine.MetadataAlreadyFrozen.selector);
+        cse.setBaseURI("x");
+        vm.expectRevert(CubicSymmetryEngine.MetadataAlreadyFrozen.selector);
+        cse.setRenderer(address(1));
         vm.expectRevert(CubicSymmetryEngine.MetadataAlreadyFrozen.selector);
         cse.freezeMetadata();
         vm.stopPrank();
     }
 
-    /// @dev A call to a non-existent function on a contract with no fallback
-    /// reverts; that is how we assert a selector is absent.
-    function _hasSelector(bytes4 selector) internal returns (bool) {
-        (bool ok, ) = address(cse).call(abi.encodePacked(selector, bytes32(0)));
-        return ok;
-    }
-
-    // -------------------------------------------------------------- royalties
-
     function test_royaltyInfo() public view {
         (address receiver, uint256 amount) = cse.royaltyInfo(1, 1 ether);
         assertEq(receiver, royalty);
-        assertEq(amount, 0.05 ether); // 500 bps
+        assertEq(amount, 0.05 ether);
     }
 
     function test_supportsInterfaces() public view {
-        assertTrue(cse.supportsInterface(0x80ac58cd)); // ERC721
-        assertTrue(cse.supportsInterface(0x5b5e139f)); // ERC721Metadata
-        assertTrue(cse.supportsInterface(0x2a55205a)); // ERC2981
+        assertTrue(cse.supportsInterface(type(IERC721).interfaceId));
+        assertTrue(cse.supportsInterface(type(IERC2981).interfaceId));
     }
 
-    // --------------------------------------------------------------- withdraw
+    // -------------------------------------------------------------- withdraw
 
     function test_withdraw() public {
         _openMint();
-        vm.prank(alice);
-        cse.mint{value: PRICE * 5}(_ids(1, 5));
-
-        uint256 before = owner.balance;
+        _mintAs(alice, _seed(1));
+        _mintAs(alice, _seed(2));
+        address payable to = payable(address(0xD00D));
         vm.prank(owner);
-        cse.withdraw(payable(owner));
-        assertEq(owner.balance - before, PRICE * 5);
+        cse.withdraw(to);
+        assertEq(to.balance, PRICE * 2);
         assertEq(address(cse).balance, 0);
     }
 
-    function test_withdrawOwnerOnly() public {
-        _openMint();
-        vm.prank(alice);
-        cse.mint{value: PRICE}(_one(1));
-
+    function test_withdrawOwnerOnlyAndRevertsWhenEmpty() public {
         vm.prank(alice);
         vm.expectRevert();
         cse.withdraw(payable(alice));
-    }
-
-    function test_withdrawRevertsWhenEmpty() public {
         vm.prank(owner);
         vm.expectRevert(CubicSymmetryEngine.NothingToWithdraw.selector);
         cse.withdraw(payable(owner));
     }
 
-    // --------------------------------------------------------------- upgrades
+    // --------------------------------------------------------------- upgrade
 
     function test_upgradePreservesState() public {
         _openMint();
-        vm.prank(alice);
-        cse.mint{value: PRICE * 4}(_ids(1, 4));
+        _mintAs(alice, _seed(1));
+        address v2 = address(new EngineV2()); // created before the prank, which the CREATE would otherwise spend
         vm.prank(owner);
-        cse.reserveMint(bob, _ids(502, 2));
-
-        EngineV2 v2impl = new EngineV2();
-        vm.prank(owner);
-        cse.upgradeToAndCall(address(v2impl), "");
-
+        cse.upgradeToAndCall(v2, "");
         EngineV2 upgraded = EngineV2(address(cse));
         assertEq(upgraded.version(), "v2");
-        // every pre-upgrade slot survives
-        assertEq(upgraded.totalSupply(), 6);
-        assertEq(upgraded.balanceOf(alice), 4);
-        assertEq(upgraded.balanceOf(bob), 2);
-        assertEq(upgraded.ownerOf(1), alice);
-        assertEq(upgraded.ownerOf(502), bob);
-        assertEq(upgraded.mintedBy(alice), 4);
-        assertEq(upgraded.reserveMinted(), 2);
-        assertEq(upgraded.price(), PRICE);
         assertEq(upgraded.owner(), owner);
-        assertEq(uint8(upgraded.mintState()), uint8(CubicSymmetryEngine.MintState.LIVE));
-        assertEq(upgraded.tokenURI(1), string.concat(BASE, "1.json"));
+        assertEq(upgraded.signer(), signer);
+        assertEq(upgraded.seedOf(1), _seed(1));
+        assertEq(upgraded.ownerOf(1), alice);
+        assertEq(upgraded.totalSupply(), 1);
+        // and minting still works through the new implementation
+        _mintAs(bob, _seed(2));
+        assertEq(upgraded.ownerOf(2), bob);
     }
 
     function test_upgradeOwnerOnly() public {
-        EngineV2 v2impl = new EngineV2();
+        address impl = address(new EngineV2());
         vm.prank(alice);
         vm.expectRevert();
-        cse.upgradeToAndCall(address(v2impl), "");
+        cse.upgradeToAndCall(impl, "");
     }
 
-    function test_mintStillWorksAfterUpgrade() public {
-        _openMint();
-        EngineV2 v2impl = new EngineV2();
-        vm.prank(owner);
-        cse.upgradeToAndCall(address(v2impl), "");
-
-        vm.prank(alice);
-        EngineV2(address(cse)).mint{value: PRICE * 2}(_ids(1, 2));
-        assertEq(cse.balanceOf(alice), 2);
-    }
-
-    // ------------------------------------------------------------------- fuzz
-
-    function testFuzz_mintQuantityWithinCap(uint8 qty) public {
-        qty = uint8(bound(qty, 1, 20));
-        _openMint();
-        vm.prank(alice);
-        cse.mint{value: PRICE * qty}(_ids(1, qty));
-        assertEq(cse.balanceOf(alice), qty);
-        assertEq(cse.totalSupply(), qty);
-    }
+    // ------------------------------------------------------------------ fuzz
 
     function testFuzz_exactPaymentRequired(uint96 value) public {
-        _openMint();
+        value = uint96(bound(value, 0, 50 ether));
         vm.assume(value != PRICE);
-        vm.deal(alice, uint256(value) + 1 ether);
+        _openMint();
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
-        cse.mint{value: value}(_one(1));
+        cse.mint{value: value}(_seed(1), d, s);
+    }
+
+    function testFuzz_anySeedMintsOnceWithApproval(bytes32 seed) public {
+        vm.assume(seed != bytes32(0));
+        _openMint();
+        _mintAs(alice, seed);
+        assertEq(cse.tokenOfSeed(seed), 1);
+        (uint256 d, bytes memory s) = _approve(bob, seed);
+        vm.prank(bob);
+        vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.SeedTaken.selector, seed));
+        cse.mint{value: PRICE}(seed, d, s);
     }
 }

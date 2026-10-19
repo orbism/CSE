@@ -18,9 +18,12 @@ export function ArtViewer({
   caption,
   children,
   footer,
+  onEngine,
 }: {
   token: Token | null;
   caption?: string;
+  /** The inline stage's live engine, for callers that read frames off it. */
+  onEngine?: (engine: Engine | null) => void;
   /** Rendered under the tooling strip, in both inline and fullscreen views. */
   footer?: (engine: Engine | null) => React.ReactNode;
   /** Rendered beside the art in the fullscreen overlay. */
@@ -89,7 +92,12 @@ export function ArtViewer({
 
   return (
     <>
-      <div className="art-frame">{stage(false, engine, setEngine)}</div>
+      <div className="art-frame">
+        {stage(false, engine, (e) => {
+          setEngine(e);
+          onEngine?.(e);
+        })}
+      </div>
       {tooling(engine)}
       {!full && footer?.(engine)}
 

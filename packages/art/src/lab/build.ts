@@ -97,11 +97,7 @@ export function paletteByName(name: string): Palette {
   return PALETTES.find((p) => p.name === name) ?? PALETTES[0];
 }
 
-/**
- * @param master the collection's master seed; only read when the genome starts
- *               from a collection Form, which is derived from it
- */
-export function buildLabPiece(genome: Genome, master = "CUBIC-SYMMETRY-ENGINE"): LabPiece {
+export function buildLabPiece(genome: Genome): LabPiece {
   const palette = paletteByName(genome.render.palette);
   const roots = rootsFor(genome);
   const rng = rngFromHex(sha256Hex(`${genome.seed}:ops`));
@@ -113,7 +109,7 @@ export function buildLabPiece(genome: Genome, master = "CUBIC-SYMMETRY-ENGINE"):
     rand: () => rng.next(),
   };
 
-  let geo = genome.form ? formGeometry(master, genome.form) : baseGeometry(genome.base, genome.field.curvature);
+  let geo = genome.form ? formGeometry(genome.form) : baseGeometry(genome.base, genome.field.curvature);
   for (const step of genome.ops) {
     const op = OPERATORS[step.op];
     if (!op) continue;

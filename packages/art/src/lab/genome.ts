@@ -97,10 +97,11 @@ export interface Op {
   args: number[];
 }
 
-/** A collection Form, as the Lab's starting shape: token id and its settled nonce. */
+/** A collection Form, as the Lab's starting shape: its token id and the seed it was minted from. */
 export interface FormRef {
   id: number;
-  nonce: number;
+  /** 32 bytes of hex, no 0x. */
+  seed: string;
 }
 
 export interface Genome {
@@ -261,8 +262,8 @@ export function normalise(g: Genome): Genome {
  *
  *   seed_base_rows_palette_spin_feedback_degree_energy_curvature~op:a,b~op:a
  *
- * A chain started from a collection Form writes `f<id>n<nonce>` where the base
- * goes (`f122n0`), so older links decode exactly as before.
+ * A chain started from a collection Form writes `f<id>s<seed>` where the base
+ * goes, so older links decode exactly as before.
  *
  * Deliberately not JSON+base64: a genotype people are meant to share, tweak by
  * hand and recognise should be legible in the address bar.
@@ -276,7 +277,7 @@ const SEP = "_";
 export function encodeGenome(g: Genome): string {
   const head = [
     g.seed,
-    g.form ? `f${g.form.id}n${g.form.nonce}` : g.base,
+    g.form ? `f${g.form.id}s${g.form.seed}` : g.base,
     g.render.rows,
     g.render.palette,
     g.render.spin,
@@ -295,7 +296,7 @@ export function decodeGenome(s: string): Genome | null {
     const f = head.split(SEP);
     if (f.length < 9) return null;
     const base = BASES.includes(f[1] as BaseName) ? (f[1] as BaseName) : "icosa";
-    const fm = /^f(\d+)n(\d+)$/.exec(f[1]);
+    const fm = /^f(\d+)s([0-9a-f]{64})$/.exec(f[1]);
     const degree = ([3, 4, 5].includes(Number(f[6])) ? Number(f[6]) : 3) as 3 | 4 | 5;
 
     const ops: Op[] = [];
@@ -315,7 +316,7 @@ export function decodeGenome(s: string): Genome | null {
     return normalise({
       seed: f[0] || "0",
       base,
-      ...(fm ? { form: { id: Number(fm[1]), nonce: Number(fm[2]) } } : {}),
+      ...(fm ? { form: { id: Number(fm[1]), seed: fm[2] } } : {}),
       ops,
       field: {
         degree,

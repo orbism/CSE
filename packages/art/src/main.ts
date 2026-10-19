@@ -1,13 +1,15 @@
 /**
  * Standalone entry for the pinned art bundle.
  *
- * Served as `animation_url`, so it takes its subject entirely from the query
- * string and never touches the network:
- *   index.html?tokenId=417&master=<master seed>
- *   index.html?seed=<64 hex chars>   (renders that seed directly)
+ * Served as `animation_url`, so it takes its subject from the page itself and
+ * never touches the network. Three ways in:
+ *   window.CSE = { id, seed }                        the on-chain page (a data:
+ *                                                    URL, which has no query string)
+ *   index.html?seed=<32 bytes hex>&id=417            the same, by URL
+ *   index.html?tokenId=417&master=…&nonce=0          the legacy derivation
  */
 
-import { type Token, deriveToken, tokenSummary } from "@cse/core";
+import { type Token, deriveToken, tokenFromSeed, tokenSummary } from "@cse/core";
 // Vite inlines the woff2 as a data URI, so the pinned bundle needs no network.
 // A 5.4 KB subset of JetBrains Mono (OFL 1.1) that renders pixel-identically to
 // the full font. See assets/README.md before regenerating it.
@@ -16,12 +18,15 @@ import { Engine } from "./renderer.js";
 
 const params = new URLSearchParams(location.search);
 const MASTER_FALLBACK = "CUBIC-SYMMETRY-ENGINE";
+const inline = (window as unknown as { CSE?: { id?: number; seed?: string } }).CSE ?? {};
 
 function resolveToken(): Token {
-  const tokenId = Number(params.get("tokenId") ?? "1");
+  const seed = inline.seed ?? params.get("seed");
+  const id = Number(inline.id ?? params.get("id") ?? params.get("tokenId") ?? "1");
+  if (seed) return tokenFromSeed(seed, Number.isFinite(id) ? id : 0);
   const master = params.get("master") ?? MASTER_FALLBACK;
   const nonce = Number(params.get("nonce") ?? "0");
-  return deriveToken(master, Number.isFinite(tokenId) ? tokenId : 1, nonce);
+  return deriveToken(master, Number.isFinite(id) ? id : 1, nonce);
 }
 
 const canvas = document.getElementById("art") as HTMLCanvasElement;
@@ -77,6 +82,8 @@ async function boot() {
     load: (t: Token) => engine.load(t),
     loadById: (id: number, master = MASTER_FALLBACK, nonce = 0) =>
       engine.load(deriveToken(master, id, nonce)),
+    /** The contract's path: a token straight from its seed. */
+    loadSeed: (seed: string, id = 0) => engine.load(tokenFromSeed(seed, id)),
     /** Force a palette — used only to render the documentation stills. */
     loadWithPalette: (id: number, master: string, nonce: number, palette: unknown) =>
       engine.load(deriveToken(master, id, nonce), { palette: palette as never }),

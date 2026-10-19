@@ -38,8 +38,6 @@ export interface LabEngineOptions {
   canvas: HTMLCanvasElement;
   size: number;
   fontUrl: string;
-  /** Master seed, for genomes that start from a collection Form. */
-  master?: string;
 }
 
 /**
@@ -128,7 +126,7 @@ export class LabEngine {
 
   load(genome: Genome) {
     if (this.piece) disposeLabPiece(this.piece);
-    this.piece = buildLabPiece(genome, this.options.master);
+    this.piece = buildLabPiece(genome);
     this.elapsed = 0;
     this.dragYaw = 0;
     this.dragPitch = 0;

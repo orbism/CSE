@@ -12,7 +12,7 @@
     "generate": "pnpm --filter @cse/generator generate",
     "upload": "pnpm --filter @cse/generator upload",
     "deploy": "node scripts/deploy.mjs",
-    "setup": "pnpm install && pnpm --filter @cse/generator exec playwright install chromium && cd packages/contracts && forge install",
+    "setup": "pnpm install && pnpm --filter @cse/generator exec playwright install chromium && cd packages/contracts && forge install foundry-rs/forge-std@v1.16.2 OpenZeppelin/openzeppelin-contracts@v5.7.0 OpenZeppelin/openzeppelin-contracts-upgradeable@v5.7.0 --no-git",
     "web": "pnpm --filter @cse/web dev"
   },
   "devDependencies": {

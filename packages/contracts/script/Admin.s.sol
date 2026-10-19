@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import {Script, console} from "forge-std/Script.sol";
 import {CubicSymmetryEngine} from "../src/CubicSymmetryEngine.sol";
+import {CSERenderer} from "../src/CSERenderer.sol";
 
 abstract contract AdminScript is Script {
     function engine() internal view returns (CubicSymmetryEngine) {
@@ -52,6 +53,49 @@ contract FreezeMetadata is AdminScript {
     }
 }
 
+/// @notice CSE_SIGNER: rotate the approver key.
+contract SetSigner is AdminScript {
+    function run() external {
+        address next = vm.envAddress("CSE_SIGNER");
+        broadcast();
+        engine().setSigner(next);
+        vm.stopBroadcast();
+        console.log("signer ->", next);
+    }
+}
+
+/// @notice CSE_RENDERER: the on-chain renderer, or 0x0 to fall back to the base URI.
+contract SetRenderer is AdminScript {
+    function run() external {
+        address renderer = vm.envAddress("CSE_RENDERER");
+        broadcast();
+        engine().setRenderer(renderer);
+        vm.stopBroadcast();
+        console.log("renderer ->", renderer);
+    }
+}
+
+/// @notice CSE_RENDERER + CSE_IMAGE_BASE: where the cover stills live, <base><id>.png
+contract SetImageBase is AdminScript {
+    function run() external {
+        string memory base = vm.envString("CSE_IMAGE_BASE");
+        broadcast();
+        CSERenderer(vm.envAddress("CSE_RENDERER")).setImageBase(base);
+        vm.stopBroadcast();
+        console.log("imageBase ->", base);
+    }
+}
+
+/// @notice CSE_RENDERER: freeze the cover location. There is no undo.
+contract LockRenderer is AdminScript {
+    function run() external {
+        broadcast();
+        CSERenderer(vm.envAddress("CSE_RENDERER")).lock();
+        vm.stopBroadcast();
+        console.log("renderer locked");
+    }
+}
+
 /// @notice CSE_PRICE_WEI
 contract SetPrice is AdminScript {
     function run() external {
@@ -63,33 +107,15 @@ contract SetPrice is AdminScript {
     }
 }
 
-/**
- * @notice CSE_RESERVE_TO, plus either
- *           CSE_RESERVE_IDS  comma-separated ids, e.g. "1,7,1099"
- *         or
- *           CSE_RESERVE_FROM + CSE_RESERVE_QTY  a contiguous run.
- *
- * Ids are explicit because the mint lets buyers choose theirs; the reserve has
- * to name which pieces it is holding back rather than taking whatever is next.
- */
+/// @notice CSE_RESERVE_TO and CSE_RESERVE_SEEDS: comma-separated 32-byte seeds, no approval needed.
 contract ReserveMint is AdminScript {
     function run() external {
         address to = vm.envAddress("CSE_RESERVE_TO");
-        uint256[] memory ids;
-
-        try vm.envUint("CSE_RESERVE_IDS", ",") returns (uint256[] memory parsed) {
-            ids = parsed;
-        } catch {
-            uint256 from = vm.envUint("CSE_RESERVE_FROM");
-            uint256 qty = vm.envUint("CSE_RESERVE_QTY");
-            ids = new uint256[](qty);
-            for (uint256 i = 0; i < qty; ++i) ids[i] = from + i;
-        }
-
+        bytes32[] memory seeds = vm.envBytes32("CSE_RESERVE_SEEDS", ",");
         broadcast();
-        engine().reserveMint(to, ids);
+        engine().reserveMint(to, seeds);
         vm.stopBroadcast();
-        console.log("reserved", ids.length, "to", to);
+        console.log("reserved", seeds.length, "to", to);
     }
 }
 

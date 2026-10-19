@@ -10,6 +10,8 @@ optimizer_runs = 200
 # UUPS proxies need the deployed bytecode of the implementation available to the
 # upgrade-safety checks and to the deploy script
 extra_output = ["storageLayout"]
+# The renderer deploy reads the generator's on-chain artefacts.
+fs_permissions = [{ access = "read", path = "../../out/onchain" }]
 
 remappings = [
   "@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/",

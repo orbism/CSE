@@ -192,6 +192,64 @@ If Etherscan shows no read/write tabs on the proxy, mark it as a proxy at
 
 ---
 
+## 5b. On chain: the engine, the metadata and the covers
+
+Nothing is pre-generated. A buyer rolls a 32-byte seed on the site; the site's
+approver (`apps/web/app/api/approve`, holding `SIGNER_PRIVATE_KEY`) checks it
+against every minted Form, structurally from the seeds on chain and
+perceptually against the mint watcher's fingerprint index, then signs
+`Mint(minter, seed, deadline)`. The contract mints only a seed signed for
+`msg.sender` (no sniping) and only once (no duplicates). Ids are sequential and
+the seed is stored with the token.
+
+`tokenURI` is served by `CSERenderer`, a separate contract the token delegates
+to (`setRenderer`; `freezeMetadata` locks it). It holds the whole CSE engine,
+gzipped and base64-encoded, in three code-chunk contracts; each token's page is
+assembled from that and its seed, so the `animation_url` is a `data:text/html`
+page that fetches nothing. Traits and rarity rank are derived from all 512
+minted seeds at sell-out and written once (`reveal`). Only the cover stills
+(`image`) live off chain, on Vercel Blob, behind a URL the owner can move until
+`LockRenderer`.
+
+Before deploying:
+
+```sh
+pnpm --filter @cse/art build                   # the engine the chain will carry
+pnpm --filter @cse/generator onchain           # out/onchain/page-tail.b64
+pnpm --filter @cse/generator onchain-check     # anvil round trip: signed mint, decode a
+                                               # live tokenURI, render it, diff the grid
+```
+
+`pnpm deploy` picks the page up automatically, asks for the approver address
+(`CSE_SIGNER`), and records the renderer address in `deployments/<network>.json`.
+On the site set `SIGNER_PRIVATE_KEY` (the approver's key) and
+`NEXT_PUBLIC_COVERS_BASE`.
+
+While the mint runs, keep the watcher up on a machine you control (it renders
+in a real browser):
+
+```sh
+BLOB_READ_WRITE_TOKEN=… pnpm --filter @cse/generator watch-mints --contract <proxy> --rpc <rpc>
+```
+
+It uploads `covers/<id>.png|svg` and `covers/index.json` to the Blob store;
+`NEXT_PUBLIC_COVERS_BASE` is that store's `covers/` URL, and the renderer's
+`imageBase` the same (`SetImageBase`).
+
+At sell-out:
+
+```sh
+pnpm --filter @cse/generator reveal --contract <proxy> --rpc <rpc>      # out/onchain/traits.bin
+CSE_RENDERER=<renderer> CSE_ONCHAIN_DIR=$PWD/out/onchain PRIVATE_KEY=… \
+  forge script script/Reveal.s.sol:Reveal --rpc-url <rpc> --broadcast
+```
+
+To add or replace the renderer later: `script/Renderer.s.sol:DeployRenderer`.
+Budget: ~14M gas for the page chunks, ~2.5M for the renderer, on top of the
+token deploy; the reveal is ~1M.
+
+---
+
 ## 6. Gas
 
 The full path is roughly **4M gas**: implementation ~2.7M, proxy + initialize
@@ -238,7 +296,7 @@ anvil loop only.
 - Gallery renders, token modal opens
 - Mint one from a second wallet, confirm the id you asked for is the id you get
 - `tokenURI(1)` resolves through the gateway and the image loads
-- Provenance check on the site matches `out/collection/provenance.json`
+- A rolled seed mints, the gallery shows it, `tokenURI` decodes to the seed
 - Royalty shows on a testnet marketplace
 
 ---

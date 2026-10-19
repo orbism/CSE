@@ -17,9 +17,8 @@ import {
   type Genome,
   type OpName,
 } from "@cse/art";
-import { PALETTES, deriveToken } from "@cse/core";
+import { PALETTES, tokenFromSeed } from "@cse/core";
 import { useAccount } from "wagmi";
-import { MASTER_SEED } from "../lib/config";
 import { ConnectModal } from "./ConnectModal";
 import { FormPickerModal } from "./FormPickerModal";
 import Link from "next/link";
@@ -152,7 +151,7 @@ export function Lab() {
       );
     measureRef.current = measure;
 
-    LabEngine.create({ canvas, size: measure(), fontUrl: "/fonts/JetBrainsMono-Regular.woff2", master: MASTER_SEED })
+    LabEngine.create({ canvas, size: measure(), fontUrl: "/fonts/JetBrainsMono-Regular.woff2" })
       .then((e) => {
         if (disposed) {
           e.dispose();
@@ -395,8 +394,8 @@ export function Lab() {
    * A collection Form becomes the chain's starting shape, in its own palette
    * and glyph density, with an empty chain to build on.
    */
-  const loadForm = (form: { id: number; nonce: number }) => {
-    const token = deriveToken(MASTER_SEED, form.id, form.nonce);
+  const loadForm = (form: { id: number; seed: string }) => {
+    const token = tokenFromSeed(form.seed, form.id);
     // a fresh starting shape starts cold
     setTemperature(0);
     apply({

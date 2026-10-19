@@ -327,33 +327,46 @@ if (network === "mainnet" && baseURI.includes("PENDING")) {
   if (!go) die("aborted");
 }
 
-// 3b. provenance -------------------------------------------------------------
-// Committed once at initialisation and never settable again, so a live deploy
-// that goes out without it can never acquire one. Refuse rather than shrug.
+// 3a. on-chain renderer ------------------------------------------------------
+// The engine and the metadata live on chain when the generator's artefacts are
+// present; otherwise tokenURI falls back to the base URI above.
 
-const provenancePath = join(COLLECTION, "provenance.json");
-let provenance = null;
-if (await exists(provenancePath)) {
-  provenance = JSON.parse(await readFile(provenancePath, "utf8"));
+step("On-chain renderer");
+
+const ONCHAIN = join(ROOT, "out/onchain");
+let onchain = null;
+if ((await exists(join(ONCHAIN, "page-tail.b64"))) && (await exists(join(ONCHAIN, "traits.bin")))) {
+  onchain = JSON.parse(await readFile(join(ONCHAIN, "onchain.json"), "utf8"));
+  ok(`engine ${onchain.engineGzipBytes} B gz, ${onchain.chunks} chunks, ${onchain.tokens} trait records`);
+} else {
+  warn("no out/onchain artefacts; the deploy will serve metadata from the base URI only");
+  console.log(C.dim("  Build them with `pnpm --filter @cse/generator onchain` and rerun, or add the\n  renderer later with script/Renderer.s.sol:DeployRenderer."));
 }
 
-const liveNetwork = network === "mainnet" || network === "sepolia";
-if (liveNetwork) {
-  if (!provenance) {
-    die(
-      `no ${provenancePath}. Run \`pnpm generate\` first — the provenance hash is set\n` +
-        "  once at initialisation and cannot be added later.",
-    );
+let imageBase = process.env.CSE_IMAGE_BASE ?? "";
+if (onchain) {
+  const coversPath = join(COLLECTION, "covers.json");
+  if (!imageBase && (await exists(coversPath))) {
+    imageBase = JSON.parse(await readFile(coversPath, "utf8")).base ?? "";
+    if (imageBase) ok(`covers on Vercel Blob: ${imageBase}`);
   }
-  if (!provenance.complete) {
-    die(
-      `provenance.json covers ${provenance.supply} tokens, not the full collection.\n` +
-        "  That is a partial run. Regenerate before deploying.",
-    );
+  if (!imageBase) {
+    warn("no cover base found (out/collection/covers.json)");
+    console.log(C.dim("  Upload them with `pnpm --filter @cse/generator covers`, or set a placeholder now;\n  the renderer's imageBase is settable until it is locked."));
+    imageBase = await ask("  Cover image base", "https://PENDING/covers/");
   }
-  if (provenance.supply !== 512) {
-    die(`provenance covers ${provenance.supply} tokens but MAX_SUPPLY is 512.`);
-  }
+  if (!imageBase.endsWith("/")) imageBase += "/";
+}
+
+// 3b. approver ---------------------------------------------------------------
+// Mints need a signature from this address (see apps/web/app/api/approve). The
+// site holds the matching SIGNER_PRIVATE_KEY; the contract holds the address.
+
+let signer = process.env.CSE_SIGNER ?? "";
+if (!signer) {
+  warn("no CSE_SIGNER set");
+  console.log(C.dim("  The approver's address. Defaults to the owner, which only works if the site's\n  SIGNER_PRIVATE_KEY is the owner's key; a dedicated hot key is the better choice."));
+  signer = await ask("  Approver address", owner);
 }
 
 // 4. parameters --------------------------------------------------------------
@@ -374,8 +387,7 @@ console.log(`
   ${C.dim("royalty ")} ${royaltyBps} bps -> ${royaltyReceiver}
   ${C.dim("baseURI ")} ${baseURI}
   ${C.dim("supply  ")} 512 (11 reserved, 20 per wallet)
-  ${C.dim("proven. ")} ${provenance ? `${provenance.hash} ${C.dim(`(${provenance.supply} tokens)`)}` : C.yellow("none — local only")}
-  ${C.dim("seed    ")} ${provenance?.masterSeed ?? process.env.CSE_MASTER_SEED ?? "CUBIC-SYMMETRY-ENGINE"}
+  ${C.dim("signer  ")} ${signer}
   ${C.dim("verify  ")} ${etherscanKey ? "yes" : C.yellow("no (no Etherscan key)")}
 `);
 
@@ -398,10 +410,8 @@ const deployEnv = {
   CSE_BASE_URI: baseURI,
   CSE_ROYALTY: royaltyReceiver,
   CSE_ROYALTY_BPS: royaltyBps,
-  CSE_PROVENANCE:
-    provenance?.hash ?? "0x0000000000000000000000000000000000000000000000000000000000000000",
-  CSE_MASTER_SEED:
-    provenance?.masterSeed ?? process.env.CSE_MASTER_SEED ?? "CUBIC-SYMMETRY-ENGINE",
+  CSE_SIGNER: signer,
+  ...(onchain ? { CSE_ONCHAIN_DIR: ONCHAIN, CSE_IMAGE_BASE: imageBase } : {}),
 };
 
 const deployArgs = [
@@ -425,8 +435,12 @@ const proxy = deployOut.match(/proxy\s+:\s*(0x[a-fA-F0-9]{40})/)?.[1];
 const implementation = deployOut.match(/implementation\s+:\s*(0x[a-fA-F0-9]{40})/)?.[1];
 if (!proxy || !implementation) die("could not parse the deployed addresses from forge output");
 
+const renderer = deployOut.match(/renderer\s+:\s*(0x[a-fA-F0-9]{40})/)?.[1] ?? null;
+if (onchain && !renderer) die("the renderer was expected but its address is missing from forge output");
+
 ok(`implementation ${implementation}`);
 ok(`proxy         ${proxy}`);
+if (renderer) ok(`renderer      ${renderer}  (engine + metadata on chain)`);
 console.log(`  ${C.dim(`${net.explorer}/address/${proxy}`)}`);
 
 // 6. verification ------------------------------------------------------------
@@ -548,6 +562,10 @@ const record = {
   priceWei,
   priceEth,
   baseURI,
+  signer,
+  renderer,
+  imageBase: renderer ? imageBase : null,
+  onchain: onchain ? { sha256: onchain.sha256, artBundleSha256: onchain.artBundleSha256 } : null,
   royalty: { receiver: royaltyReceiver, bps: Number(royaltyBps) },
   explorer: `${net.explorer}/address/${proxy}`,
   deployedAt: new Date().toISOString(),
@@ -579,6 +597,8 @@ if (net.local) {
     masterSeed: process.env.CSE_MASTER_SEED,
     alchemyKey,
     alchemyNetwork: net.alchemy,
+    signerKey: process.env.SIGNER_PRIVATE_KEY ?? "",
+    coversBase: renderer ? imageBase : (process.env.NEXT_PUBLIC_COVERS_BASE ?? ""),
     imagesCid,
     artCid,
     gateway: process.env.CSE_IPFS_GATEWAY,

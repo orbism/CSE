@@ -1,44 +1,42 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { tokensIndexUrl } from "./config";
+import { type Token, type Traits, tokenFromSeed } from "@cse/core";
 
+/**
+ * The minted Forms, derived in the browser from the seeds the contract holds.
+ * `/api/tokens` is one read of `seedOf` per token behind a short edge cache;
+ * everything else (traits, equation, the art) follows from the seed.
+ */
 export interface TokenRow {
   tokenId: number;
-  seed: string;
-  /**
-   * The rejection nonce the generator settled on. Critical: a token that failed
-   * a uniqueness gate was re-derived under a bumped nonce, so deriving it at
-   * nonce 0 produces different art than was actually minted.
-   */
-  nonce?: number;
+  /** 0x-prefixed, 32 bytes. */
+  seed: `0x${string}`;
+  traits: Omit<Traits, "palette"> & { palette: string };
   equation: string;
-  discriminant: number;
-  degenerate: boolean;
-  rarityRank: number;
-  traits: {
-    structure: string;
-    rootState: string;
-    symmetry: string;
-    discriminantClass: string;
-    discriminantBand: string;
-    energyBand: string;
-    feedbackBand: string;
-    phase: number;
-    palette: string;
-  };
+  /** Known only after the sell-out reveal, when the whole set exists to rank. */
+  rarityRank?: number;
 }
+
+export const rowOf = (token: Token, seed: `0x${string}`): TokenRow => ({
+  tokenId: token.tokenId,
+  seed,
+  traits: { ...token.traits, palette: token.traits.palette.name },
+  equation: token.equation,
+});
 
 let cache: Promise<TokenRow[]> | null = null;
 
-/** Fetch the generator's token index once per page load. */
-export function loadTokenIndex(): Promise<TokenRow[]> {
+/** Fetch and derive once per page load; `refresh` forgets the cache so a fresh mint shows up. */
+export function loadTokenIndex(refresh = false): Promise<TokenRow[]> {
+  if (refresh) cache = null;
   if (!cache) {
-    cache = fetch(tokensIndexUrl())
+    cache = fetch("/api/tokens")
       .then((r) => {
         if (!r.ok) throw new Error(`token index unavailable (${r.status})`);
-        return r.json();
+        return r.json() as Promise<{ tokens: { id: number; seed: `0x${string}` }[] }>;
       })
+      .then((b) => b.tokens.map((t) => rowOf(tokenFromSeed(t.seed, t.id), t.seed)))
       .catch((e) => {
         cache = null;
         throw e;
@@ -70,9 +68,4 @@ export function useTokenIndex(): TokenIndex {
   const byId = new Map<number, TokenRow>();
   for (const r of rows ?? []) byId.set(r.tokenId, r);
   return { rows, byId, error };
-}
-
-/** The nonce a token was published with, defaulting to 0 when unknown. */
-export function nonceFor(index: TokenIndex, tokenId: number): number {
-  return index.byId.get(tokenId)?.nonce ?? 0;
 }

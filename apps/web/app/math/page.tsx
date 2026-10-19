@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { ARCHETYPES } from "@cse/core";
 import { MathDemo, type DemoSample } from "@/components/MathDemo";
-import { ProvenanceCheck } from "@/components/ProvenanceCheck";
 
 /**
  * Three solutions carried through every figure on the page.
@@ -90,7 +89,7 @@ export default function MathPage() {
         No textures, no model files. Every vertex gets computed at load from the{" "}
         <strong>Form&rsquo;s</strong> seed. Here&rsquo;s the whole chain, and where the math
         stops and I start. Heads up, it&rsquo;s pretty technical. Not your thing? Skip
-        straight to the <Link href="/lab">lab</Link> and break stuff.
+        straight to the <Link href="/">lab</Link> and break stuff.
       </p>
 
       <section>
@@ -309,7 +308,7 @@ q = 2a³/27 − ab/3 + c`}</pre>
       <section>
         <h3>6 · Sound</h3>
         <p>
-          The <Link href="/lab">lab</Link> can listen. Share a tab&rsquo;s audio or pick a mic
+          The <Link href="/">lab</Link> can listen. Share a tab&rsquo;s audio or pick a mic
           or line-in (BlackHole gets you system audio on a Mac) and it splits the signal into
           bass, mids and highs, each measured against a slowly fading peak so quiet and loud
           tracks both use the full range. The kick gets its own path, a steep band-pass
@@ -328,15 +327,18 @@ q = 2a³/27 − ab/3 + c`}</pre>
       <section>
         <h3>7 · Uniqueness</h3>
         <p>
-          Every seed is <code>SHA-256(master ‖ id ‖ nonce)</code> and generation tosses
-          anything too close to an existing Form on two gates, one comparing the math as a
-          weighted vector and one comparing a 496-bit hash of the actual render, re-rolling
-          the nonce until it passes. It&rsquo;s all settled before the mint, minting only
-          takes ids so nobody can sneak in their own coefficients, and the whole{" "}
-          <code>id → seed</code> table is hashed into the contract with no setter, so you can
-          check the art you saw is the art you got:
+          Nothing is pre-generated. You roll a 32-byte seed in the browser, the Form is derived
+          from it on the spot, and before you can mint it the approver checks it against every
+          Form already minted on two gates, one comparing the math as a weighted vector and one
+          comparing a 496-bit hash of the actual render. Too close and it gets rerolled. Clear
+          and the approver signs (your wallet, that seed, ten minutes), the contract only mints
+          a seed signed for the wallet sending the transaction, so nobody can snipe your roll
+          from the mempool, and a seed can only ever be minted once. The seed is written on
+          chain with the token and the engine derives the piece from it, so the art you got is
+          the art you saw. Traits and rarity are a property of the whole set, so they get
+          derived from the minted seeds and written once at sell-out, and anyone can rerun
+          that and check.
         </p>
-        <ProvenanceCheck />
       </section>
 
       <section>

@@ -63,16 +63,9 @@ async function viaAlchemy(owner: string): Promise<number[]> {
 }
 
 /**
- * ownerOf sweep over the ids that actually exist.
- *
- * The contract lets buyers choose their token id, so the minted set is sparse:
- * a wallet can hold #1098 while totalSupply is 3. Scanning 1..totalSupply — the
- * obvious thing when ids were sequential — silently returned nothing. The
- * bitmap gives the exact set of live ids in one call, and only those are
- * queried.
- *
- * Deliberately not `multicall`: a bare anvil has no Multicall3 deployed, and
- * with allowFailure the whole sweep came back empty with no error at all.
+ * ownerOf sweep over 1..totalMinted. Ids are sequential, so the live set is a
+ * range. Deliberately not `multicall`: a bare anvil has no Multicall3 deployed,
+ * and with allowFailure the whole sweep came back empty with no error at all.
  */
 async function viaRpcSweep(owner: string): Promise<number[]> {
   const client = createPublicClient({
@@ -81,22 +74,10 @@ async function viaRpcSweep(owner: string): Promise<number[]> {
       batch: { batchSize: 200, wait: 8 },
     }),
   });
-
-  const bitmap = (await client.readContract({
-    address: CONTRACT_ADDRESS,
-    abi: CSE_ABI,
-    functionName: "mintedBitmap",
-  })) as readonly bigint[];
-
-  const live: number[] = [];
-  for (let word = 0; word < bitmap.length; word++) {
-    let bits = bitmap[word];
-    if (bits === 0n) continue;
-    for (let bit = 0; bit < 256; bit++) {
-      if ((bits >> BigInt(bit)) & 1n) live.push(word * 256 + bit + 1);
-    }
-    bits = 0n;
-  }
+  const total = Number(
+    await client.readContract({ address: CONTRACT_ADDRESS, abi: CSE_ABI, functionName: "totalMinted" }),
+  );
+  const live = Array.from({ length: total }, (_, i) => i + 1);
   if (live.length === 0) return [];
 
   const target = owner.toLowerCase();

@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { useAccount } from "wagmi";
-import { COLLECTION, deriveToken } from "@cse/core";
-import { IS_DEMO, MASTER_SEED, imageUrl } from "@/lib/config";
-import { nonceFor, useTokenIndex } from "@/lib/tokens";
+import { COLLECTION } from "@cse/core";
+import { IS_DEMO, imageUrl } from "@/lib/config";
+import { useTokenIndex } from "@/lib/tokens";
 
 const pad = (n: number) => String(n).padStart(4, "0");
 
@@ -23,7 +23,7 @@ export function FormPickerModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onLoad: (form: { id: number; nonce: number }) => void;
+  onLoad: (form: { id: number; seed: string }) => void;
   /** Where to render; the Lab passes its root so true full screen shows it. */
   container?: Element | null;
 }) {
@@ -41,7 +41,7 @@ export function FormPickerModal({
     setNote("");
     if (IS_DEMO) {
       setOwned([]);
-      setNote("Nothing's minted yet, so no wallet holds a Form. Load any one by id below.");
+      setNote("Nothing's minted yet, so there is no Form to load. Roll one on the input page.");
       return;
     }
     if (!address) return;
@@ -71,7 +71,7 @@ export function FormPickerModal({
     () =>
       (owned ?? []).map((id) => ({
         id,
-        structure: deriveToken(MASTER_SEED, id, nonceFor(index, id)).traits.structure,
+        structure: index.byId.get(id)?.traits.structure ?? "",
         src: imageUrl(id),
       })),
     [owned, index],
@@ -80,9 +80,11 @@ export function FormPickerModal({
   if (!open) return null;
 
   const typed = Number(byId);
-  const typedOk = Number.isInteger(typed) && typed >= 1 && typed <= COLLECTION.supply;
+  const typedOk = Number.isInteger(typed) && typed >= 1 && typed <= COLLECTION.supply && index.byId.has(typed);
   const load = (id: number) => {
-    onLoad({ id, nonce: nonceFor(index, id) });
+    const row = index.byId.get(id);
+    if (!row) return;
+    onLoad({ id, seed: row.seed.slice(2) });
     onClose();
   };
 
@@ -149,12 +151,12 @@ export function FormPickerModal({
             }}
           >
             <label className="mono-label" htmlFor="form-by-id">
-              Or any Form by id
+              Or any minted Form by id
             </label>
             <input
               id="form-by-id"
               inputMode="numeric"
-              placeholder={`1 to ${COLLECTION.supply}`}
+              placeholder={index.rows?.length ? `1 to ${index.rows.length}` : "none minted yet"}
               value={byId}
               onChange={(e) => setById(e.target.value.replace(/\D/g, ""))}
             />

@@ -6,6 +6,8 @@ const nextConfig = {
   env: { MODE: (process.env.MODE ?? "LIVE").toUpperCase() },
   // both workspace packages ship TypeScript source rather than a build step
   transpilePackages: ["@cse/core", "@cse/art"],
+  // the lab is the landing page now; old links still land there
+  redirects: async () => [{ source: "/lab", destination: "/", permanent: true }],
   webpack: (config) => {
     // The workspace packages use ESM-correct ".js" specifiers that actually
     // resolve to ".ts" sources; webpack needs to be told to follow them.

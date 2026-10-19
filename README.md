@@ -16,21 +16,17 @@ prompted by <https://x.com/VitalikButerin/status/2081776660941029636>.
 
 ```bash
 pnpm setup     # installs deps, chromium and the foundry libs — once
-pnpm dev       # builds the art, generates a preview, deploys, opens the site
+pnpm dev       # builds the art, deploys, mints a few, opens the site
 ```
 
 Then open <http://localhost:3000>.
 
 `pnpm dev` is self-bootstrapping. On a clean checkout it builds the art bundle,
-generates a preview collection, starts anvil, deploys the contract, serves the
-images and metadata, and starts the site — all wired together. It needs no API
-keys and no `.env`.
-
-The preview is not the first N ids. It is one token of **every** archetype,
-worked out from the maths before anything renders (`pnpm --filter
-@cse/generator cover`), and all of them are minted during the deploy so the
-gallery opens with every form already on screen. A 1..N prefix would miss the
-scarce ones outright — the rarest sit past id 200.
+starts anvil, deploys the contract, mints a dozen Forms from random seeds the
+way the site does (each one approved with a signature from the deployer, who is
+the local approver), renders their covers with the mint watcher, and starts the
+site — all wired together. It needs no API keys and no `.env`. `CSE_DEV_TOKENS`
+sets how many it mints.
 
 It writes `apps/web/.env.local` for you, and also prints the same block so you
 can copy it straight out of the terminal:
@@ -42,9 +38,8 @@ NEXT_PUBLIC_MASTER_SEED=CUBIC-SYMMETRY-ENGINE   # must match the collection's se
 NEXT_PUBLIC_RPC_URL=http://127.0.0.1:8545       # anvil has no key, skip /api/rpc
 # ALCHEMY_API_KEY=                              # not needed against anvil
 # ALCHEMY_NETWORK=
-NEXT_PUBLIC_IMAGES_CID=                         # served from LOCAL_ASSETS locally
-NEXT_PUBLIC_ART_CID=
-NEXT_PUBLIC_IPFS_GATEWAY=https://4everland.io/ipfs
+SIGNER_PRIVATE_KEY=0xac09…ff80                  # the approver; locally the anvil key
+NEXT_PUBLIC_COVERS_BASE=http://127.0.0.1:8788/covers/
 NEXT_PUBLIC_LOCAL_ASSETS=http://127.0.0.1:8788
 ```
 
@@ -127,11 +122,12 @@ Pick **Sepolia**. The script walks the whole thing:
 
 1. **Preflight** — checks the RPC responds, the chain ID matches, the deployer
    has ETH, and foundry libs are installed.
-2. **Metadata** — reads the base URI from `out/collection/upload.json` if you
-   have pinned already, otherwise asks. A placeholder is fine; the URI is
-   settable later.
+2. **Metadata** — the fallback base URI (a placeholder is fine; on-chain
+   metadata takes over once the renderer is deployed), the on-chain page from
+   `out/onchain` and the cover base, and the approver address (`CSE_SIGNER`).
 3. **Parameters** — owner, price, royalty. Defaults come from `.env`.
-4. **Deploy** — implementation + ERC1967 proxy, initialised in one transaction.
+4. **Deploy** — implementation + ERC1967 proxy, initialised in one transaction,
+   then the renderer with the engine on chain, wired in.
 5. **Verify** — submits both contracts to Etherscan, retrying standalone with
    re-encoded constructor args if the inline pass does not confirm. It prints a
    copy-pasteable command if verification still fails.
@@ -295,59 +291,44 @@ to zero.
 
 ## Generation
 
+Nothing is pre-generated. A Form exists when someone rolls it: the site draws
+a 32-byte seed, derives the piece in the browser, and the approver checks it
+against every minted Form before signing it for that wallet. The generator
+package is the tooling around that:
+
 ```bash
-pnpm --filter @cse/generator forms                    # the 22 art-page stills
-pnpm generate                                         # full 512 at 3000px
-pnpm generate -- --limit 25 --size 900                # smoke run
-pnpm generate -- --ids 1,17,40                        # build exactly these ids
-pnpm --filter @cse/generator cover                    # one id per archetype
-pnpm --filter @cse/generator smoke                    # one token per archetype
-pnpm --filter @cse/generator variety Exploded         # within-archetype check
-pnpm --filter @cse/generator calibrate 200            # re-measure hash thresholds
+pnpm --filter @cse/generator onchain                    # the engine page for the renderer deploy
+pnpm --filter @cse/generator onchain-check              # anvil round trip of a signed mint + tokenURI
+pnpm --filter @cse/generator watch-mints --contract … --rpc …   # covers + fingerprints per mint
+pnpm --filter @cse/generator reveal --contract … --rpc …        # traits + rarity at sell-out
+pnpm --filter @cse/generator forms                      # the 22 art-page stills
+pnpm --filter @cse/generator calibrate 200              # re-measure the thresholds
 ```
 
-Uniqueness runs two independent gates, because either alone lets duplicates
-through. The **structural** gate compares the derived mathematics (L2 over a
-weighted feature vector, threshold 0.45). The **perceptual** gate compares what
-the piece looks like — a 496-bit hash combining a gradient half and an occupancy
-half, threshold 16 Hamming. Failing either bumps the nonce and re-derives.
+Uniqueness runs two independent gates (`packages/core/src/uniqueness.ts`),
+because either alone lets duplicates through. The **structural** gate compares
+the derived mathematics (L2 over a weighted feature vector, 0.45 across forms,
+1.0 within one). The **perceptual** gate compares what the piece looks like — a
+496-bit hash of the rendered 16x16 grid, 32 Hamming. The browser clears the
+structural gate locally while rolling, then fingerprints the live render and
+asks the approver, which holds the minted set's fingerprints from the watcher's
+`covers/index.json`. Too close and the roll is replaced before you see it.
 
-Both thresholds are calibrated against measured distributions rather than
+The thresholds are calibrated against measured distributions rather than
 guessed; `calibrate.ts` regenerates the numbers after any renderer change. They
-have to be read as rejection *rates*, not distances: a threshold that excludes
-0.45% of all pairs rejects ~90% of candidates once 511 tokens are on file, which
-leaves the tail of the run unsatisfiable — a token exhausted all 24 of its
-nonces at exactly that setting. Both now sit at the measured 0.1st percentile
-(structural 0.457, perceptual 16), where the whole duplicate tail is still cut —
-every one of the twelve closest measured pairs is 10 Hamming or below, and all
-are same-archetype look-alikes — and a full run accepts 512/512 in 749 attempts.
-
-A third gate guarantees **coverage**: every archetype has to end the run with at
-least four Forms. Reachability and presence are not the same thing — the
-selector cannot leave a form unreachable, but at 512 tokens the rarest sit close
-enough to zero that an unlucky seed can strand one. Rather than tune the
-sampling until that stops happening by chance, a pass before the render loop
-counts the archetypes and, for any that fall short, re-derives ids off the most
-over-represented form at a bumped nonce until they land where they are needed.
-That is the same mechanism uniqueness already relies on, so a forced token is as
-legitimately derived as any other — and every one is listed in `report.json`,
-because a silent thumb on the scale would be worse than no guarantee at all. In
-practice the sampling covers all 22 on its own and the gate does nothing.
+have to be read as rejection *rates*, not distances: against a nearly full set
+roughly 40% of candidates get rerolled, which the browser absorbs in well under
+a second.
 
 The art page shows one still per archetype, committed under
-`apps/web/public/forms`. They are real Forms from the collection rendered by the
-same engine, all at one pose and forced into a single CRT-green palette so the
-difference between them reads as shape rather than hue. That palette is passed
-as an override and deliberately kept out of `PALETTES` — `paletteOf` indexes
-that array modulo its length, so adding an entry would recolour every token.
-Re-run `pnpm --filter @cse/generator forms` after changing any builder.
+`apps/web/public/forms`, rendered by the same engine at one pose and forced
+into a single CRT-green palette so the difference between them reads as shape
+rather than hue. That palette is passed as an override and deliberately kept
+out of `PALETTES` — `paletteOf` indexes that array modulo its length, so adding
+an entry would recolour every token.
 
-Outputs per token: a 3000×3000 PNG, an SVG master (the same glyph grid as
-`<text>` rows), an ANSI text dump, and metadata carrying the equation, exact
-roots, seed and rarity rank.
-
-Budget roughly **7 seconds per token** at 1400px, more at 3000px — the
-tube-heavy archetypes dominate. A full run is measured in hours.
+The older pre-generation pipeline (`pnpm generate`, `pipeline.ts`) is still in
+the package for research runs and the compare harness; the mint does not use it.
 
 ## Contract
 
@@ -384,24 +365,18 @@ Three pages, linked under the wordmark:
 
 ### You mint the Form you are looking at
 
-`mint(uint256[] tokenIds)` takes explicit ids rather than handing out the next
-in sequence, so the piece on screen is the piece that arrives. **Solve again**
-draws another id nobody has taken.
+`mint(bytes32 seed, uint256 deadline, bytes signature)` mints the seed on
+screen, with the approver's EIP-712 signature over `(you, seed, deadline)`.
+**Solve again** rolls a fresh seed; **Surprise me** mints the next clear roll
+with the canvas covered, and lifts the cover when the transaction lands.
 
-This keeps the guarantees that matter. The collection is generated,
-uniqueness-checked and pinned before the mint opens, so every id already has
-settled art, metadata and a 3000² cover image — choosing yours takes nothing
-away from that. Two buyers can want the same id; the loser reverts with
-`AlreadyMinted(id)` rather than silently receiving something else, and the UI
-moves on to another Form.
-
-`mintedBitmap()` returns the taken ids packed into two words, so the site can
-grey out the whole supply in one call instead of 512.
-
-The alternative — letting a buyer generate an arbitrary Form and mint that —
-would require capturing a seed on-chain, rendering metadata and cover images
-lazily behind a service, and giving up pre-verified visual uniqueness, since
-nothing can be compared before it exists. That is a different project.
+The signature is what keeps the guarantees that matter. It names the wallet,
+so a roll seen in the mempool is useless to anyone else; it is only issued
+after the seed has been checked against every minted Form; and a seed mints
+once, so two people cannot end up with the same piece. Ids are sequential and
+the seed is stored with the token, from which the on-chain engine derives the
+art — what you got is what you saw. Traits and rarity rank are derived from
+the full set of seeds at sell-out and written once.
 
 ### Tooling and the readout
 

@@ -87,7 +87,17 @@ function sampleDegenerate(rng: Rng): Cubic {
 }
 
 export function deriveToken(masterSeed: string, tokenId: number, nonce = 0): Token {
-  const seed = tokenSeed(masterSeed, tokenId, nonce);
+  return tokenFromSeed(tokenSeed(masterSeed, tokenId, nonce), tokenId, nonce);
+}
+
+/**
+ * A Token straight from its 32-byte seed, which is what the contract stores:
+ * the seed is rolled on the site, approved against every minted Form, and
+ * written at mint. `0x` is accepted and ignored.
+ */
+export function tokenFromSeed(seedHex: string, tokenId = 0, nonce = 0): Token {
+  const seed = seedHex.replace(/^0x/i, "").toLowerCase();
+  if (!/^[0-9a-f]{64}$/.test(seed)) throw new Error("seed must be 32 bytes of hex");
   const rng = rngFromHex(seed);
   const degenerate = rng.chance(DEGENERATE_RATE);
   const cubic = degenerate ? sampleDegenerate(rng) : sampleGeneric(rng);

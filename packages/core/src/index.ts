@@ -4,6 +4,7 @@ export * from "./solve.js";
 export * from "./palettes.js";
 export * from "./traits.js";
 export * from "./token.js";
+export * from "./uniqueness.js";
 
 /** Collection constants shared by the generator, contract scripts and the site. */
 export const COLLECTION = {

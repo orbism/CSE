@@ -3,41 +3,45 @@ pragma solidity ^0.8.24;
 
 import {ERC721Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC721/ERC721Upgradeable.sol";
 import {ERC2981Upgradeable} from "@openzeppelin/contracts-upgradeable/token/common/ERC2981Upgradeable.sol";
-import {OwnableUpgradeable} from "@openzeppelin/contracts-upgradeable/access/OwnableUpgradeable.sol";
+import {Ownable2StepUpgradeable} from "@openzeppelin/contracts-upgradeable/access/Ownable2StepUpgradeable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+
+interface ICSERenderer {
+    function tokenURI(uint256 tokenId) external view returns (string memory);
+}
 
 /**
  * @title Cubic Symmetry Engine
  * @notice 512 tokens, each visualising the algebraic structure of one cubic
- *         equation. Deliberately minimal: the art, the metadata and the
- *         uniqueness guarantees all live off-chain and are fixed before the
- *         mint opens. This contract only needs to sell and own them.
+ *         equation. A Form is a pure function of a 32-byte seed; the seed is
+ *         rolled on the site, checked against every Form already minted, and
+ *         written here at mint. `renderer` serves the metadata and the live
+ *         piece from the chain itself (see CSERenderer), with `baseURI` as the
+ *         off-chain fallback until one is set.
  *
- * Upgradeable via UUPS so the base URI scheme, royalty policy or mint mechanics
- * can be corrected without migrating holders to a new address.
+ * ## How a mint stays unique and un-snipeable
  *
- * ## What makes a Form unique, and where that is enforced
+ * Nothing on chain can tell two Forms apart, so the check runs before the
+ * transaction: the site's approver derives the candidate, compares it against
+ * everything minted (the maths directly, the rendered fingerprint via the mint
+ * watcher's index) and, if it is clear, signs `Mint(minter, seed, deadline)`.
+ * This contract mints only a seed whose signature names `msg.sender`, so a
+ * roll seen in the mempool is worthless to anyone else, and a seed can be
+ * minted exactly once. Token ids are sequential.
  *
- * A Form is a pure function of `(masterSeed, tokenId, nonce)`. Minting takes
- * token ids and nothing else — there is no way to submit coefficients, a seed or
- * any other description of the art — so two tokens can no more share a Form than
- * they can share an id, and ERC-721 already guarantees the latter. That is the
- * whole of the duplication argument, and it needs no per-token state here.
- *
- * What it does *not* give you is a way to check that the art you were shown is
- * the art the token is bound to, because the nonce and the seed live off-chain.
- * `provenanceHash` and `masterSeed` close that: both are set once at
- * initialisation, have no setter, and let anyone recompute the entire id -> art
- * mapping and confirm it is the one that was committed to before the mint
- * opened. `freezeMetadata` then makes the pointer to it permanent.
+ * Upgradeable via UUPS so the renderer, royalty policy or mint mechanics can be
+ * corrected without migrating holders to a new address.
  */
 contract CubicSymmetryEngine is
     Initializable,
     ERC721Upgradeable,
     ERC2981Upgradeable,
-    OwnableUpgradeable,
+    Ownable2StepUpgradeable,
+    EIP712Upgradeable,
     UUPSUpgradeable
 {
     using Strings for uint256;
@@ -48,6 +52,7 @@ contract CubicSymmetryEngine is
     /// @notice Held back for the artist; minted by the owner, not the public sale.
     uint256 public constant RESERVE = 11;
     uint256 public constant MAX_PER_WALLET = 20;
+    bytes32 public constant MINT_TYPEHASH = keccak256("Mint(address minter,bytes32 seed,uint256 deadline)");
 
     enum MintState {
         CLOSED,
@@ -64,39 +69,35 @@ contract CubicSymmetryEngine is
     string private _baseTokenURI;
     mapping(address => uint256) public mintedBy;
 
-    /**
-     * @notice keccak256 of the canonical id -> seed table, committed before the
-     *         mint opened. Set once at initialisation; there is no setter.
-     *
-     * The table is `"<id>:<seed>"` for every id in 1..MAX_SUPPLY, ascending,
-     * joined with "\n" and with no trailing newline. `provenance.json` in the
-     * published collection carries both the hash and that description, so the
-     * value here can be recomputed from the art alone.
-     */
-    bytes32 public provenanceHash;
+    /// @notice The address whose signature approves a seed for a minter.
+    address public signer;
+    /// @notice The seed each token was minted from. Immutable once written.
+    mapping(uint256 => bytes32) public seedOf;
+    /// @notice Which token holds a seed; zero means unminted.
+    mapping(bytes32 => uint256) public tokenOfSeed;
 
-    /**
-     * @notice The seed every Form is derived from. Set once at initialisation.
-     *
-     * Already public in each token's metadata and animation URL; holding it here
-     * as well means the derivation can be reproduced from the chain rather than
-     * from a file the project happens to still be hosting.
-     */
-    string public masterSeed;
-
-    /// @notice Once true, `setBaseURI` reverts forever.
+    /// @notice Once true, `setBaseURI` and `setRenderer` revert forever.
     bool public metadataFrozen;
 
+    /**
+     * @notice Serves `tokenURI` when set: the on-chain metadata and engine.
+     *         Zero means fall back to `baseURI` + id + ".json".
+     */
+    address public renderer;
+
     /// @dev Reserved so future upgrades can add storage without collisions.
-    uint256[41] private __gap;
+    uint256[40] private __gap;
 
     // ------------------------------------------------------------------ events
 
+    event Minted(uint256 indexed tokenId, bytes32 indexed seed, address indexed to);
     event MintStateChanged(MintState previous, MintState current);
     event PriceChanged(uint256 previous, uint256 current);
+    event SignerChanged(address signer);
     event BaseURIChanged(string baseURI);
     event Withdrawn(address indexed to, uint256 amount);
-    event MetadataFrozen(string baseURI);
+    event MetadataFrozen(string baseURI, address renderer);
+    event RendererChanged(address renderer);
 
     // ------------------------------------------------------------------ errors
 
@@ -109,8 +110,9 @@ contract CubicSymmetryEngine is
     error NothingToWithdraw();
     error WithdrawFailed();
     error ZeroAddress();
-    error InvalidTokenId();
-    error AlreadyMinted(uint256 tokenId);
+    error SeedTaken(bytes32 seed);
+    error ApprovalExpired();
+    error BadSignature();
     error MetadataAlreadyFrozen();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
@@ -118,113 +120,79 @@ contract CubicSymmetryEngine is
         _disableInitializers();
     }
 
-    /**
-     * @param provenanceHash_ keccak256 of the canonical id -> seed table. Pass
-     *        bytes32(0) only for throwaway local deploys; a real deployment
-     *        without it can never add one later, by design.
-     * @param masterSeed_ the seed the collection was generated with.
-     */
     function initialize(
         address owner_,
         uint256 price_,
         string memory baseURI_,
         address royaltyReceiver_,
         uint96 royaltyFeeNumerator_,
-        bytes32 provenanceHash_,
-        string memory masterSeed_
+        address signer_
     ) external initializer {
-        if (owner_ == address(0) || royaltyReceiver_ == address(0)) revert ZeroAddress();
+        if (owner_ == address(0) || royaltyReceiver_ == address(0) || signer_ == address(0)) revert ZeroAddress();
         __ERC721_init("Cubic Symmetry Engine", "CSE");
         __ERC2981_init();
+        // Two-step: a transfer only completes when the new owner accepts, so a
+        // typo in the address cannot strand the contract without an admin.
         __Ownable_init(owner_);
-        __UUPSUpgradeable_init();
+        __Ownable2Step_init();
+        __EIP712_init("Cubic Symmetry Engine", "1");
 
         price = price_;
         _baseTokenURI = baseURI_;
+        signer = signer_;
         _setDefaultRoyalty(royaltyReceiver_, royaltyFeeNumerator_);
-
-        // Written here and nowhere else. The point of the commitment is that it
-        // cannot be revised after people have seen what they were buying.
-        provenanceHash = provenanceHash_;
-        masterSeed = masterSeed_;
     }
 
     // ------------------------------------------------------------------- mint
 
     /**
-     * @notice Mint specific tokens by id.
-     *
-     * Ids are chosen by the buyer rather than handed out in sequence, so the
-     * piece on screen is the piece that arrives. The collection is generated,
-     * uniqueness-checked and pinned before the mint opens, so every id already
-     * has settled art and metadata — picking one takes nothing away from that.
-     *
-     * Two people can want the same id. The loser's transaction reverts with
-     * `AlreadyMinted` rather than silently substituting a different piece.
+     * @notice Mint the Form rolled from `seed`, with the approver's signature
+     *         over (msg.sender, seed, deadline). One token per call.
      */
-    function mint(uint256[] calldata tokenIds) external payable {
+    function mint(bytes32 seed, uint256 deadline, bytes calldata signature) external payable {
         if (mintState != MintState.LIVE) revert MintNotLive();
-        uint256 quantity = tokenIds.length;
-        if (quantity == 0) revert InvalidQuantity();
+        if (block.timestamp > deadline) revert ApprovalExpired();
         // the reserve is carved out of the cap so the owner can always claim it
-        if (totalMinted + quantity > MAX_SUPPLY - (RESERVE - reserveMinted)) {
-            revert SupplyExhausted();
-        }
-        if (mintedBy[msg.sender] + quantity > MAX_PER_WALLET) revert WalletLimitExceeded();
-        if (msg.value != price * quantity) revert IncorrectPayment();
+        if (totalMinted + 1 > MAX_SUPPLY - (RESERVE - reserveMinted)) revert SupplyExhausted();
+        if (mintedBy[msg.sender] + 1 > MAX_PER_WALLET) revert WalletLimitExceeded();
+        if (msg.value != price) revert IncorrectPayment();
 
-        mintedBy[msg.sender] += quantity;
-        _mintChosen(msg.sender, tokenIds);
+        bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(MINT_TYPEHASH, msg.sender, seed, deadline)));
+        (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
+        if (err != ECDSA.RecoverError.NoError || recovered != signer) revert BadSignature();
+
+        mintedBy[msg.sender] += 1;
+        _mintSeed(msg.sender, seed);
     }
 
-    /// @notice Owner-only claim against the held-back reserve, also by id.
-    function reserveMint(address to, uint256[] calldata tokenIds) external onlyOwner {
+    /// @notice Owner-only claim against the held-back reserve, no approval needed.
+    function reserveMint(address to, bytes32[] calldata seeds) external onlyOwner {
         if (to == address(0)) revert ZeroAddress();
-        uint256 quantity = tokenIds.length;
+        uint256 quantity = seeds.length;
         if (quantity == 0) revert InvalidQuantity();
         if (reserveMinted + quantity > RESERVE) revert ReserveExhausted();
         if (totalMinted + quantity > MAX_SUPPLY) revert SupplyExhausted();
 
         reserveMinted += quantity;
-        _mintChosen(to, tokenIds);
+        for (uint256 i = 0; i < quantity; ++i) _mintSeed(to, seeds[i]);
     }
 
-    function _mintChosen(address to, uint256[] calldata tokenIds) private {
-        uint256 quantity = tokenIds.length;
-        for (uint256 i = 0; i < quantity; ++i) {
-            uint256 id = tokenIds[i];
-            if (id == 0 || id > MAX_SUPPLY) revert InvalidTokenId();
-            // catches both an id someone else already took and a duplicate
-            // inside this very call, since the first _safeMint lands first
-            if (_ownerOf(id) != address(0)) revert AlreadyMinted(id);
-            _safeMint(to, id);
-        }
-        totalMinted += quantity;
+    /**
+     * @dev Sequential ids. The count moves before the token exists: `_safeMint`
+     *      calls out to a contract recipient, which may re-enter `mint`, and
+     *      every check above must see the updated supply when it does.
+     */
+    function _mintSeed(address to, bytes32 seed) private {
+        if (seed == bytes32(0) || tokenOfSeed[seed] != 0) revert SeedTaken(seed);
+        uint256 id = ++totalMinted;
+        seedOf[id] = seed;
+        tokenOfSeed[seed] = id;
         if (totalMinted == MAX_SUPPLY && mintState != MintState.SOLD_OUT) {
             emit MintStateChanged(mintState, MintState.SOLD_OUT);
             mintState = MintState.SOLD_OUT;
         }
-    }
-
-    /**
-     * @notice Which ids are taken, as a bitmap.
-     *
-     * The site has to grey out minted pieces across the whole supply. One call
-     * returning 1,111 bits packed into ~18 words is the difference between that
-     * being free and being 1,111 RPC round-trips.
-     */
-    function mintedBitmap() external view returns (uint256[] memory bits) {
-        bits = new uint256[]((MAX_SUPPLY + 255) / 256);
-        for (uint256 id = 1; id <= MAX_SUPPLY; ++id) {
-            if (_ownerOf(id) != address(0)) {
-                bits[(id - 1) >> 8] |= 1 << ((id - 1) & 0xff);
-            }
-        }
-    }
-
-    /// @notice Whether a single id is still available.
-    function isAvailable(uint256 tokenId) external view returns (bool) {
-        return tokenId != 0 && tokenId <= MAX_SUPPLY && _ownerOf(tokenId) == address(0);
+        emit Minted(id, seed, to);
+        _safeMint(to, id);
     }
 
     // -------------------------------------------------------------- admin
@@ -240,23 +208,34 @@ contract CubicSymmetryEngine is
         price = next;
     }
 
+    /// @notice Rotate the approver. Signatures from the old key stop working at once.
+    function setSigner(address next) external onlyOwner {
+        if (next == address(0)) revert ZeroAddress();
+        signer = next;
+        emit SignerChanged(next);
+    }
+
     function setBaseURI(string calldata next) external onlyOwner {
         if (metadataFrozen) revert MetadataAlreadyFrozen();
         _baseTokenURI = next;
         emit BaseURIChanged(next);
     }
 
+    /// @notice Point `tokenURI` at an on-chain renderer, or back at `baseURI` with zero.
+    function setRenderer(address next) external onlyOwner {
+        if (metadataFrozen) revert MetadataAlreadyFrozen();
+        renderer = next;
+        emit RendererChanged(next);
+    }
+
     /**
-     * @notice Make the current base URI permanent. One way, on purpose.
-     *
-     * Until this is called the owner can repoint every token's metadata at any
-     * time, which makes `provenanceHash` a promise rather than a guarantee.
-     * Call it once the pinned CID is final.
+     * @notice Make the current metadata source permanent. One way, on purpose.
+     *         Call it once the renderer (or the pinned CID) is final.
      */
     function freezeMetadata() external onlyOwner {
         if (metadataFrozen) revert MetadataAlreadyFrozen();
         metadataFrozen = true;
-        emit MetadataFrozen(_baseTokenURI);
+        emit MetadataFrozen(_baseTokenURI, renderer);
     }
 
     function setDefaultRoyalty(address receiver, uint96 feeNumerator) external onlyOwner {
@@ -289,12 +268,18 @@ contract CubicSymmetryEngine is
         return totalMinted;
     }
 
+    /// @notice The EIP-712 digest a minter's approval signs; exposed so approvers can be tested against the chain.
+    function mintDigest(address minter, bytes32 seed, uint256 deadline) external view returns (bytes32) {
+        return _hashTypedDataV4(keccak256(abi.encode(MINT_TYPEHASH, minter, seed, deadline)));
+    }
+
     function _baseURI() internal view override returns (string memory) {
         return _baseTokenURI;
     }
 
     function tokenURI(uint256 tokenId) public view override returns (string memory) {
         _requireOwned(tokenId);
+        if (renderer != address(0)) return ICSERenderer(renderer).tokenURI(tokenId);
         return string.concat(_baseTokenURI, tokenId.toString(), ".json");
     }
 
