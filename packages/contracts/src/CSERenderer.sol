@@ -48,9 +48,11 @@ contract CSERenderer is Ownable2Step {
     error NoRecord(uint256 tokenId);
     error AlreadyRevealed();
     error NotSoldOut();
+    error NotRevealer();
 
     event ImageBaseChanged(string imageBase);
     event Revealed(address traits);
+    event RevealerChanged(address revealer);
     event LockedForever();
 
     uint256 public constant RECORD = 8;
@@ -64,6 +66,8 @@ contract CSERenderer is Ownable2Step {
     /// @notice Prefix of every cover URL: `<imageBase><id>.png`.
     string public imageBase;
     bool public locked;
+    /// @notice May call `reveal` besides the owner: the mint watcher's key, so sell-out reveals itself.
+    address public revealer;
 
     constructor(address token_, address[] memory pageParts_, string memory imageBase_) Ownable(msg.sender) {
         token = ICSEToken(token_);
@@ -79,11 +83,18 @@ contract CSERenderer is Ownable2Step {
         emit ImageBaseChanged(next);
     }
 
+    function setRevealer(address next) external onlyOwner {
+        revealer = next;
+        emit RevealerChanged(next);
+    }
+
     /**
      * @notice Write the trait table, once, after the last token is minted.
+     *         Owner or revealer.
      * @param traits_ an SSTORE2 pointer holding MAX_SUPPLY x RECORD bytes
      */
-    function reveal(address traits_) external onlyOwner {
+    function reveal(address traits_) external {
+        if (msg.sender != owner() && msg.sender != revealer) revert NotRevealer();
         if (traits != address(0)) revert AlreadyRevealed();
         if (token.totalMinted() < MAX_SUPPLY) revert NotSoldOut();
         traits = traits_;

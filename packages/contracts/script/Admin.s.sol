@@ -16,7 +16,7 @@ abstract contract AdminScript is Script {
     }
 }
 
-/// @notice CSE_MINT_STATE: 0 = CLOSED, 1 = LIVE, 2 = SOLD_OUT
+/// @notice CSE_MINT_STATE: 0 = CLOSED, 1 = ALLOWLIST, 2 = PUBLIC (3 = SOLD_OUT happens by itself)
 contract SetMintState is AdminScript {
     function run() external {
         uint256 state = vm.envUint("CSE_MINT_STATE");
@@ -24,6 +24,39 @@ contract SetMintState is AdminScript {
         engine().setMintState(CubicSymmetryEngine.MintState(uint8(state)));
         vm.stopBroadcast();
         console.log("mintState ->", state);
+    }
+}
+
+/// @notice CSE_ALLOWLIST_ROOT: the raffle's Merkle root (apps/web `pnpm draw`)
+contract SetAllowlistRoot is AdminScript {
+    function run() external {
+        bytes32 root = vm.envBytes32("CSE_ALLOWLIST_ROOT");
+        broadcast();
+        engine().setAllowlistRoot(root);
+        vm.stopBroadcast();
+        console.log("allowlistRoot set");
+    }
+}
+
+/// @notice CSE_ALLOWLIST_PRICE_WEI
+contract SetAllowlistPrice is AdminScript {
+    function run() external {
+        uint256 p = vm.envUint("CSE_ALLOWLIST_PRICE_WEI");
+        broadcast();
+        engine().setAllowlistPrice(p);
+        vm.stopBroadcast();
+        console.log("allowlistPrice ->", p);
+    }
+}
+
+/// @notice CSE_RENDERER, CSE_REVEALER: who besides the owner may trigger the reveal
+contract SetRevealer is AdminScript {
+    function run() external {
+        address next = vm.envAddress("CSE_REVEALER");
+        broadcast();
+        CSERenderer(vm.envAddress("CSE_RENDERER")).setRevealer(next);
+        vm.stopBroadcast();
+        console.log("revealer ->", next);
     }
 }
 

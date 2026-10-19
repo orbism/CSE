@@ -332,10 +332,13 @@ the package for research runs and the compare harness; the mint does not use it.
 
 ## Contract
 
-`CubicSymmetryEngine` — ERC-721 + ERC-2981 + Ownable, UUPS upgradeable.
-512 supply, 11 reserved, 20 per wallet, 0.005 ETH, owner-flipped
-`CLOSED → LIVE → SOLD_OUT`. The reserve is carved out of the public cap so it
-stays claimable after a sellout.
+`CubicSymmetryEngine` — ERC-721 + ERC-2981 + Ownable2Step, UUPS upgradeable.
+512 supply, 11 reserved, 16 per wallet, owner-flipped
+`CLOSED → ALLOWLIST → PUBLIC`, `SOLD_OUT` by itself at 512. The allowlist
+window takes a Merkle proof (the raffle on `/allowlist`, drawn by
+`pnpm --filter @cse/web draw`) at 0.005 ETH; public is 0.007. Every mint also
+needs the approver's signature. The reserve is carved out of the public cap so
+it stays claimable after a sellout.
 
 ```bash
 pnpm test:contracts

@@ -3301,3 +3301,16 @@ body {
   text-shadow: var(--glow);
   pointer-events: none;
 }
+
+/* ── allowlist ──────────────────────────────────────────────────────────── */
+
+.allowlist {
+  max-width: 560px;
+}
+
+.allowlist-input {
+  width: 100%;
+  margin-top: 4px;
+  font-family: var(--display);
+  letter-spacing: 0.04em;
+}

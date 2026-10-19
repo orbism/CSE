@@ -4,7 +4,8 @@ import { privateKeyToAccount } from "viem/accounts";
 import { type Prior, collision, hashFromHex, priorOf, tokenFromSeed } from "@cse/core";
 import { MINT_TYPES, mintDomain } from "@/lib/abi";
 import { CONTRACT_ADDRESS, COVERS_BASE, IS_DEMO, activeChain } from "@/lib/config";
-import { mintedSeeds } from "@/lib/seeds-server";
+import { HAS_DB, db } from "@/lib/db";
+import { mintState, mintedSeeds } from "@/lib/seeds-server";
 
 /**
  * The approver. A seed may only be minted with this key's signature over
@@ -13,16 +14,21 @@ import { mintedSeeds } from "@/lib/seeds-server";
  *
  * Before signing, the candidate is checked against every minted Form:
  *   - structurally, from the seeds on chain (derived here, no render needed)
- *   - perceptually, against the fingerprints the mint watcher has published to
- *     covers/index.json after rendering each token
+ *   - perceptually, against the fingerprints the mint watcher files after
+ *     rendering each token (the Fingerprint table; covers/index.json when the
+ *     site runs without a database)
  * plus whatever this instance has approved in the last few minutes and not yet
  * seen minted. The browser sends the candidate's own fingerprint, computed by
  * the same engine; a client could lie about it, which would only ever cost the
  * collection one look-alike that the watcher's own render then flags.
  *
+ * During ALLOWLIST the minter also has to be a raffle winner; the approval then
+ * carries the Merkle proof the contract wants.
+ *
  *   POST { seed, minter, hash?, dryRun? }
- *     -> { ok: true, deadline, signature }        approved
+ *     -> { ok: true, deadline, signature, proof } approved
  *     -> { ok: true }                             dryRun, would be approved
+ *     -> 403 { error }                            allowlist phase, wallet not drawn
  *     -> 409 { ok: false, reason, against }       too close to a minted Form
  */
 export const runtime = "nodejs";
@@ -53,6 +59,10 @@ async function priors(): Promise<Prior[]> {
 
 async function fingerprints(): Promise<Map<number, string>> {
   const out = new Map<number, string>();
+  if (HAS_DB) {
+    for (const f of await db().fingerprint.findMany({ select: { tokenId: true, hash: true } })) out.set(f.tokenId, f.hash);
+    return out;
+  }
   if (!COVERS_BASE) return out;
   try {
     const res = await fetch(`${COVERS_BASE}index.json`, { cache: "no-store" });
@@ -92,6 +102,19 @@ export async function POST(request: Request) {
   if (hit) return NextResponse.json({ ok: false, ...hit }, { status: 409 });
   if (body.dryRun) return NextResponse.json({ ok: true });
 
+  // allowlist window: only drawn wallets, and they need their proof
+  let proof: string[] = [];
+  if ((await mintState()) === 1) {
+    const entry = HAS_DB ? await db().allowlistEntry.findUnique({ where: { address: body.minter.toLowerCase() } }) : null;
+    if (!entry?.won) {
+      return NextResponse.json(
+        { error: "This wallet is not on the allowlist. The public mint opens after the allowlist window." },
+        { status: 403 },
+      );
+    }
+    proof = entry.proof;
+  }
+
   const deadline = BigInt(Math.floor(Date.now() / 1000) + APPROVAL_SECONDS);
   const signature = await privateKeyToAccount(key).signTypedData({
     domain: mintDomain(activeChain.id, CONTRACT_ADDRESS),
@@ -100,5 +123,5 @@ export async function POST(request: Request) {
     message: { minter: body.minter as `0x${string}`, seed: seed as `0x${string}`, deadline },
   });
   pending.set(seed, { prior: priorOf(token, hash ?? undefined), expires: Date.now() + APPROVAL_SECONDS * 1000 });
-  return NextResponse.json({ ok: true, deadline: deadline.toString(), signature });
+  return NextResponse.json({ ok: true, deadline: deadline.toString(), signature, proof });
 }

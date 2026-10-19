@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import {Script, console} from "forge-std/Script.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {CubicSymmetryEngine} from "../src/CubicSymmetryEngine.sol";
+import {CSERenderer} from "../src/CSERenderer.sol";
 import {RendererBase} from "./Renderer.s.sol";
 
 /**
@@ -14,11 +15,13 @@ import {RendererBase} from "./Renderer.s.sol";
  * env:
  *   PRIVATE_KEY        deployer key
  *   CSE_OWNER          contract owner (defaults to the deployer)
- *   CSE_PRICE_WEI      mint price          (default 0.005 ether)
+ *   CSE_PRICE_WEI      public mint price   (default 0.007 ether)
+ *   CSE_ALLOWLIST_PRICE_WEI  allowlist price (default 0.005 ether)
  *   CSE_BASE_URI       metadata base URI   (default a localhost placeholder)
  *   CSE_ROYALTY        royalty receiver    (defaults to the owner)
  *   CSE_ROYALTY_BPS    royalty numerator   (default 500 = 5%)
  *   CSE_SIGNER         the approver whose signatures authorise mints (defaults to the owner)
+ *   CSE_REVEALER       may call the renderer's reveal besides the owner (default none)
  *   CSE_ONCHAIN_DIR    optional; with CSE_IMAGE_BASE, also deploys the on-chain
  *                      renderer (engine + metadata) and wires it in
  *
@@ -28,7 +31,8 @@ contract Deploy is RendererBase {
         uint256 pk = vm.envUint("PRIVATE_KEY");
         address deployer = vm.addr(pk);
         address owner = vm.envOr("CSE_OWNER", deployer);
-        uint256 price = vm.envOr("CSE_PRICE_WEI", uint256(0.005 ether));
+        uint256 price = vm.envOr("CSE_PRICE_WEI", uint256(0.007 ether));
+        uint256 allowlistPrice = vm.envOr("CSE_ALLOWLIST_PRICE_WEI", uint256(0.005 ether));
         string memory baseURI = vm.envOr("CSE_BASE_URI", string("http://127.0.0.1:8788/metadata/"));
         address royalty = vm.envOr("CSE_ROYALTY", owner);
         uint256 royaltyBps = vm.envOr("CSE_ROYALTY_BPS", uint256(500));
@@ -39,7 +43,7 @@ contract Deploy is RendererBase {
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
         bytes memory init = abi.encodeCall(
             CubicSymmetryEngine.initialize,
-            (owner, price, baseURI, royalty, uint96(royaltyBps), signer)
+            (owner, price, allowlistPrice, baseURI, royalty, uint96(royaltyBps), signer)
         );
         ERC1967Proxy p = new ERC1967Proxy(address(impl), init);
 
@@ -53,6 +57,7 @@ contract Deploy is RendererBase {
         console.log("proxy          :", proxy);
         console.log("owner          :", owner);
         console.log("price (wei)    :", price);
+        console.log("allowlist (wei):", allowlistPrice);
         console.log("baseURI        :", baseURI);
         console.log("signer         :", signer);
     }
@@ -63,6 +68,9 @@ contract Deploy is RendererBase {
         if (bytes(dir).length == 0) return;
         address renderer = deployRenderer(proxy, dir, vm.envString("CSE_IMAGE_BASE"));
         CubicSymmetryEngine(proxy).setRenderer(renderer);
+        address revealer = vm.envOr("CSE_REVEALER", address(0));
+        if (revealer != address(0)) CSERenderer(renderer).setRevealer(revealer);
         console.log("renderer       :", renderer);
+        console.log("revealer       :", revealer);
     }
 }

@@ -50,7 +50,7 @@ export function MintBox() {
   const { data, refetch } = useReadContracts({
     contracts: [
       { ...base, functionName: "mintState" },
-      { ...base, functionName: "price" },
+      { ...base, functionName: "currentPrice" },
       { ...base, functionName: "totalMinted" },
       { ...base, functionName: "remainingPublic" },
       { ...base, functionName: "MAX_PER_WALLET" },
@@ -65,9 +65,21 @@ export function MintBox() {
   const maxPerWallet = Number((data?.[4]?.result as bigint | undefined) ?? 20n);
   const walletMinted = Number((data?.[5]?.result as bigint | undefined) ?? 0n);
   const label = IS_DEMO ? "CLOSED" : (MINT_STATE[state] ?? "CLOSED");
-  const isLive = label === "LIVE";
+  const allowlistPhase = label === "ALLOWLIST";
+  const isLive = allowlistPhase || label === "PUBLIC";
   const soldOut = remaining === 0 && supply > 0;
   const walletRemaining = Math.max(0, maxPerWallet - walletMinted);
+
+  // allowlist window: is this wallet one of the drawn?
+  const [allow, setAllow] = useState<{ entered: boolean; won: boolean } | null>(null);
+  useEffect(() => {
+    if (!allowlistPhase || !address) return setAllow(null);
+    fetch(`/api/allowlist?address=${address}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then(setAllow)
+      .catch(() => setAllow(null));
+  }, [allowlistPhase, address]);
+  const allowed = !allowlistPhase || !!allow?.won;
 
   const { data: balance } = useBalance({
     address,
@@ -171,7 +183,7 @@ export function MintBox() {
         address: CONTRACT_ADDRESS,
         abi: CSE_ABI,
         functionName: "mint",
-        args: [seed, approval.deadline, approval.signature],
+        args: [seed, approval.deadline, approval.signature, approval.proof],
         value: price,
         chainId: activeChain.id,
       });
@@ -210,7 +222,7 @@ export function MintBox() {
   const shortOfFunds = isConnected && balance !== undefined && balance.value < price + gasHeadroom;
   const friendly = error ? describeTxError(error) : null;
   const busy = phase === "approving" || phase === "minting" || confirming;
-  const canMint = isLive && isConnected && phase === "ready" && !soldOut && walletRemaining > 0 && !shortOfFunds;
+  const canMint = isLive && isConnected && allowed && phase === "ready" && !soldOut && walletRemaining > 0 && !shortOfFunds;
 
   return (
     <div className="panel">
@@ -218,8 +230,8 @@ export function MintBox() {
         <span>{isLive ? "Mint" : "The collection"}</span>
         <span className="mint-state">
           mint:{" "}
-          <span className={`badge ${label === "LIVE" ? "live" : label === "SOLD_OUT" ? "sold" : "closed"}`}>
-            {isLive ? "open" : "closed"}
+          <span className={`badge ${isLive ? "live" : label === "SOLD_OUT" ? "sold" : "closed"}`}>
+            {allowlistPhase ? "allowlist" : isLive ? "open" : "closed"}
           </span>
         </span>
       </div>
@@ -297,7 +309,7 @@ export function MintBox() {
                 setBlind(true);
                 roll();
               }}
-              disabled={busy || soldOut || walletRemaining === 0}
+              disabled={busy || soldOut || walletRemaining === 0 || !allowed}
               title="Mint the next clear roll without seeing it first"
             >
               Surprise me
@@ -321,7 +333,9 @@ export function MintBox() {
               <dt>You mint</dt>
               <dd style={{ color: "var(--accent)" }}>{blind ? "the one under the cover" : "this one, exactly"}</dd>
               <dt>Price</dt>
-              <dd>{formatEther(price)} ETH</dd>
+              <dd>
+                {formatEther(price)} ETH{allowlistPhase ? " · allowlist" : ""}
+              </dd>
               <dt>Minted</dt>
               <dd>
                 {supply} / {COLLECTION.supply} · {remaining} left
@@ -341,7 +355,9 @@ export function MintBox() {
                 <button className="primary" style={{ width: "100%", marginTop: 12 }} disabled={!canMint || busy} onClick={mint}>
                   {soldOut
                     ? "Sold out"
-                    : walletRemaining === 0
+                    : !allowed
+                      ? "Not on the allowlist"
+                      : walletRemaining === 0
                       ? "Wallet limit reached"
                       : shortOfFunds
                         ? "Not enough ETH"
@@ -368,6 +384,12 @@ export function MintBox() {
               </>
             )}
 
+            {allowlistPhase && isConnected && allow && !allow.won && (
+              <div className="status warn">
+                Allowlist window: only the wallets drawn in the raffle can mint right now. The public mint opens
+                to everyone after it.
+              </div>
+            )}
             {wrongChain && (
               <div className="status warn">
                 Your wallet is on chain {walletChainId}. This collection lives on {activeChain.name} ({activeChain.id}).

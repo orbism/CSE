@@ -17,14 +17,15 @@ contract CubicSymmetryEngineTest is Test {
     address internal royalty = address(0xF00D);
     uint256 internal signerPk = 0x5167;
     address internal signer;
-    uint256 internal constant PRICE = 0.005 ether;
+    uint256 internal constant PRICE = 0.007 ether;
+    uint256 internal constant ALLOWLIST_PRICE = 0.005 ether;
     string internal constant BASE = "ipfs://bafyMetadata/";
 
     function setUp() public {
         signer = vm.addr(signerPk);
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
         bytes memory data =
-            abi.encodeCall(CubicSymmetryEngine.initialize, (owner, PRICE, BASE, royalty, 500, signer));
+            abi.encodeCall(CubicSymmetryEngine.initialize, (owner, PRICE, ALLOWLIST_PRICE, BASE, royalty, 500, signer));
         cse = CubicSymmetryEngine(address(new ERC1967Proxy(address(impl), data)));
         vm.deal(alice, 100 ether);
         vm.deal(bob, 100 ether);
@@ -55,15 +56,15 @@ contract CubicSymmetryEngineTest is Test {
     function _mintAs(address who, bytes32 seed) internal {
         (uint256 deadline, bytes memory sig) = _approve(who, seed);
         vm.prank(who);
-        cse.mint{value: PRICE}(seed, deadline, sig);
+        cse.mint{value: PRICE}(seed, deadline, sig, new bytes32[](0));
     }
 
     function _openMint() internal {
         vm.prank(owner);
-        cse.setMintState(CubicSymmetryEngine.MintState.LIVE);
+        cse.setMintState(CubicSymmetryEngine.MintState.PUBLIC);
     }
 
-    /// @dev Buys out the whole public allocation, 20 per wallet, seeds from `firstSeed`.
+    /// @dev Buys out the whole public allocation, MAX_PER_WALLET per wallet, seeds from `firstSeed`.
     function _drainPublic(uint160 firstBuyer, uint256 firstSeed) internal {
         uint256 remaining = cse.remainingPublic();
         uint256 n = firstSeed;
@@ -76,6 +77,131 @@ contract CubicSymmetryEngineTest is Test {
         }
     }
 
+    // ----------------------------------------------------- allowlist helpers
+
+    /// Pair hash the way OpenZeppelin's MerkleProof does: sorted, then keccak.
+    function _pair(bytes32 x, bytes32 y) internal pure returns (bytes32) {
+        return x < y ? keccak256(abi.encodePacked(x, y)) : keccak256(abi.encodePacked(y, x));
+    }
+
+    function _leaf(address a) internal pure returns (bytes32) {
+        return keccak256(bytes.concat(keccak256(abi.encode(a))));
+    }
+
+    /// A three-leaf tree (alice, bob, owner): root and alice's proof.
+    function _allowlist() internal view returns (bytes32 root, bytes32[] memory aliceProof) {
+        bytes32 la = _leaf(alice);
+        bytes32 lb = _leaf(bob);
+        bytes32 lo = _leaf(owner);
+        root = _pair(_pair(la, lb), lo);
+        aliceProof = new bytes32[](2);
+        aliceProof[0] = lb;
+        aliceProof[1] = lo;
+    }
+
+    function _openAllowlist() internal returns (bytes32[] memory aliceProof) {
+        bytes32 root;
+        (root, aliceProof) = _allowlist();
+        vm.startPrank(owner);
+        cse.setAllowlistRoot(root);
+        cse.setMintState(CubicSymmetryEngine.MintState.ALLOWLIST);
+        vm.stopPrank();
+    }
+
+    // ------------------------------------------------------------ phases
+
+    function test_allowlistMintsAtAllowlistPriceWithProof() public {
+        bytes32[] memory proof = _openAllowlist();
+        assertEq(cse.currentPrice(), ALLOWLIST_PRICE);
+        assertTrue(cse.isAllowlisted(alice, proof));
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
+        vm.prank(alice);
+        cse.mint{value: ALLOWLIST_PRICE}(_seed(1), d, s, proof);
+        assertEq(cse.ownerOf(1), alice);
+    }
+
+    function test_allowlistRejectsPublicPriceAndBadProof() public {
+        bytes32[] memory proof = _openAllowlist();
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
+        cse.mint{value: PRICE}(_seed(1), d, s, proof);
+
+        // the right proof for the wrong wallet
+        address carol = address(0xCAB0);
+        vm.deal(carol, 1 ether);
+        (uint256 d2, bytes memory s2) = _approve(carol, _seed(2));
+        vm.prank(carol);
+        vm.expectRevert(CubicSymmetryEngine.NotAllowlisted.selector);
+        cse.mint{value: ALLOWLIST_PRICE}(_seed(2), d2, s2, proof);
+
+        // no proof at all
+        (uint256 d3, bytes memory s3) = _approve(bob, _seed(3));
+        vm.prank(bob);
+        vm.expectRevert(CubicSymmetryEngine.NotAllowlisted.selector);
+        cse.mint{value: ALLOWLIST_PRICE}(_seed(3), d3, s3, new bytes32[](0));
+    }
+
+    function test_publicIgnoresProofAndChargesPublicPrice() public {
+        bytes32[] memory proof = _openAllowlist();
+        vm.prank(owner);
+        cse.setMintState(CubicSymmetryEngine.MintState.PUBLIC);
+        assertEq(cse.currentPrice(), PRICE);
+        (uint256 d, bytes memory s) = _approve(alice, _seed(1));
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
+        cse.mint{value: ALLOWLIST_PRICE}(_seed(1), d, s, proof);
+        vm.prank(alice);
+        cse.mint{value: PRICE}(_seed(1), d, s, proof);
+        // a wallet off the list mints too
+        _mintAs(bob, _seed(2));
+        assertEq(cse.totalMinted(), 2);
+    }
+
+    function test_allowlistWalletCapSharedAcrossPhases() public {
+        bytes32[] memory proof = _openAllowlist();
+        for (uint256 i = 0; i < 16; ++i) {
+            (uint256 d, bytes memory s) = _approve(alice, _seed(i));
+            vm.prank(alice);
+            cse.mint{value: ALLOWLIST_PRICE}(_seed(i), d, s, proof);
+        }
+        vm.prank(owner);
+        cse.setMintState(CubicSymmetryEngine.MintState.PUBLIC);
+        (uint256 d2, bytes memory s2) = _approve(alice, _seed(99));
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.WalletLimitExceeded.selector);
+        cse.mint{value: PRICE}(_seed(99), d2, s2, new bytes32[](0));
+    }
+
+    function test_allowlistAdminOwnerOnly() public {
+        vm.prank(alice);
+        vm.expectRevert();
+        cse.setAllowlistRoot(bytes32(uint256(1)));
+        vm.prank(alice);
+        vm.expectRevert();
+        cse.setAllowlistPrice(1);
+        vm.startPrank(owner);
+        cse.setAllowlistRoot(bytes32(uint256(1)));
+        cse.setAllowlistPrice(1);
+        vm.stopPrank();
+        assertEq(cse.allowlistRoot(), bytes32(uint256(1)));
+        assertEq(cse.allowlistPrice(), 1);
+    }
+
+    function test_soldOutIsAutomaticAndClosesBothPhases() public {
+        bytes32[] memory proof = _openAllowlist();
+        vm.prank(owner);
+        cse.reserveMint(owner, _seeds(9000, 11));
+        vm.prank(owner);
+        cse.setMintState(CubicSymmetryEngine.MintState.PUBLIC);
+        _drainPublic(0x5000, 100);
+        assertEq(uint8(cse.mintState()), uint8(CubicSymmetryEngine.MintState.SOLD_OUT));
+        (uint256 d, bytes memory s) = _approve(alice, _seed(7));
+        vm.prank(alice);
+        vm.expectRevert(CubicSymmetryEngine.MintNotLive.selector);
+        cse.mint{value: PRICE}(_seed(7), d, s, proof);
+    }
+
     // ---------------------------------------------------------------- init
 
     function test_initialState() public view {
@@ -86,7 +212,9 @@ contract CubicSymmetryEngineTest is Test {
         assertEq(cse.price(), PRICE);
         assertEq(cse.MAX_SUPPLY(), 512);
         assertEq(cse.RESERVE(), 11);
-        assertEq(cse.MAX_PER_WALLET(), 20);
+        assertEq(cse.MAX_PER_WALLET(), 16);
+        assertEq(cse.allowlistPrice(), ALLOWLIST_PRICE);
+        assertEq(cse.currentPrice(), PRICE);
         assertEq(uint8(cse.mintState()), uint8(CubicSymmetryEngine.MintState.CLOSED));
         assertEq(cse.totalSupply(), 0);
         assertEq(cse.remainingPublic(), 501);
@@ -94,19 +222,19 @@ contract CubicSymmetryEngineTest is Test {
 
     function test_cannotReinitialize() public {
         vm.expectRevert();
-        cse.initialize(owner, PRICE, BASE, royalty, 500, signer);
+        cse.initialize(owner, PRICE, ALLOWLIST_PRICE, BASE, royalty, 500, signer);
     }
 
     function test_implementationIsLocked() public {
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
         vm.expectRevert();
-        impl.initialize(owner, PRICE, BASE, royalty, 500, signer);
+        impl.initialize(owner, PRICE, ALLOWLIST_PRICE, BASE, royalty, 500, signer);
     }
 
     function test_initRejectsZeroSigner() public {
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
         bytes memory data =
-            abi.encodeCall(CubicSymmetryEngine.initialize, (owner, PRICE, BASE, royalty, 500, address(0)));
+            abi.encodeCall(CubicSymmetryEngine.initialize, (owner, PRICE, ALLOWLIST_PRICE, BASE, royalty, 500, address(0)));
         vm.expectRevert(CubicSymmetryEngine.ZeroAddress.selector);
         new ERC1967Proxy(address(impl), data);
     }
@@ -117,7 +245,7 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.MintNotLive.selector);
-        cse.mint{value: PRICE}(_seed(1), d, s);
+        cse.mint{value: PRICE}(_seed(1), d, s, new bytes32[](0));
     }
 
     function test_mintWritesSeedAndSequentialId() public {
@@ -141,9 +269,9 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.startPrank(alice);
         vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
-        cse.mint{value: PRICE - 1}(_seed(1), d, s);
+        cse.mint{value: PRICE - 1}(_seed(1), d, s, new bytes32[](0));
         vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
-        cse.mint{value: PRICE + 1}(_seed(1), d, s);
+        cse.mint{value: PRICE + 1}(_seed(1), d, s, new bytes32[](0));
         vm.stopPrank();
     }
 
@@ -154,7 +282,7 @@ contract CubicSymmetryEngineTest is Test {
         vm.warp(deadline + 1);
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.ApprovalExpired.selector);
-        cse.mint{value: PRICE}(_seed(1), deadline, s);
+        cse.mint{value: PRICE}(_seed(1), deadline, s, new bytes32[](0));
     }
 
     function test_mintRejectsUnapprovedSigner() public {
@@ -163,7 +291,7 @@ contract CubicSymmetryEngineTest is Test {
         bytes memory s = _sig(0xBAD, alice, _seed(1), deadline);
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.BadSignature.selector);
-        cse.mint{value: PRICE}(_seed(1), deadline, s);
+        cse.mint{value: PRICE}(_seed(1), deadline, s, new bytes32[](0));
     }
 
     /// An approval names its minter: a roll seen in the mempool is useless to anyone else.
@@ -172,7 +300,7 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.prank(bob);
         vm.expectRevert(CubicSymmetryEngine.BadSignature.selector);
-        cse.mint{value: PRICE}(_seed(1), d, s);
+        cse.mint{value: PRICE}(_seed(1), d, s, new bytes32[](0));
     }
 
     function test_approvalBindsTheSeed() public {
@@ -180,7 +308,7 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.BadSignature.selector);
-        cse.mint{value: PRICE}(_seed(2), d, s);
+        cse.mint{value: PRICE}(_seed(2), d, s, new bytes32[](0));
     }
 
     function test_seedMintsOnce() public {
@@ -189,7 +317,7 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(bob, _seed(1));
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.SeedTaken.selector, _seed(1)));
-        cse.mint{value: PRICE}(_seed(1), d, s);
+        cse.mint{value: PRICE}(_seed(1), d, s, new bytes32[](0));
     }
 
     function test_zeroSeedRejected() public {
@@ -197,17 +325,17 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(alice, bytes32(0));
         vm.prank(alice);
         vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.SeedTaken.selector, bytes32(0)));
-        cse.mint{value: PRICE}(bytes32(0), d, s);
+        cse.mint{value: PRICE}(bytes32(0), d, s, new bytes32[](0));
     }
 
     function test_walletCapEnforced() public {
         _openMint();
-        for (uint256 i = 0; i < 20; ++i) _mintAs(alice, _seed(i));
-        assertEq(cse.balanceOf(alice), 20);
+        for (uint256 i = 0; i < 16; ++i) _mintAs(alice, _seed(i));
+        assertEq(cse.balanceOf(alice), 16);
         (uint256 d, bytes memory s) = _approve(alice, _seed(99));
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.WalletLimitExceeded.selector);
-        cse.mint{value: PRICE}(_seed(99), d, s);
+        cse.mint{value: PRICE}(_seed(99), d, s, new bytes32[](0));
     }
 
     function test_publicMintCannotConsumeReserve() public {
@@ -219,7 +347,7 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(alice, _seed(5000));
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.SupplyExhausted.selector);
-        cse.mint{value: PRICE}(_seed(5000), d, s);
+        cse.mint{value: PRICE}(_seed(5000), d, s, new bytes32[](0));
 
         // the owner can still claim every reserved piece
         vm.prank(owner);
@@ -243,8 +371,8 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.startPrank(alice);
         vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
-        cse.mint{value: PRICE}(_seed(1), d, s);
-        cse.mint{value: 0.01 ether}(_seed(1), d, s);
+        cse.mint{value: PRICE}(_seed(1), d, s, new bytes32[](0));
+        cse.mint{value: 0.01 ether}(_seed(1), d, s, new bytes32[](0));
         vm.stopPrank();
         assertEq(cse.ownerOf(1), alice);
     }
@@ -258,11 +386,11 @@ contract CubicSymmetryEngineTest is Test {
 
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.BadSignature.selector);
-        cse.mint{value: PRICE}(_seed(1), d, old);
+        cse.mint{value: PRICE}(_seed(1), d, old, new bytes32[](0));
 
         bytes memory fresh = _sig(nextPk, alice, _seed(1), d);
         vm.prank(alice);
-        cse.mint{value: PRICE}(_seed(1), d, fresh);
+        cse.mint{value: PRICE}(_seed(1), d, fresh, new bytes32[](0));
         assertEq(cse.ownerOf(1), alice);
     }
 
@@ -410,7 +538,7 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(alice, _seed(1));
         vm.prank(alice);
         vm.expectRevert(CubicSymmetryEngine.IncorrectPayment.selector);
-        cse.mint{value: value}(_seed(1), d, s);
+        cse.mint{value: value}(_seed(1), d, s, new bytes32[](0));
     }
 
     function testFuzz_anySeedMintsOnceWithApproval(bytes32 seed) public {
@@ -421,6 +549,6 @@ contract CubicSymmetryEngineTest is Test {
         (uint256 d, bytes memory s) = _approve(bob, seed);
         vm.prank(bob);
         vm.expectRevert(abi.encodeWithSelector(CubicSymmetryEngine.SeedTaken.selector, seed));
-        cse.mint{value: PRICE}(seed, d, s);
+        cse.mint{value: PRICE}(seed, d, s, new bytes32[](0));
     }
 }

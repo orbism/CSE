@@ -27,7 +27,7 @@ const CONTRACTS = join(ROOT, "packages/contracts");
 const ONCHAIN = join(ROOT, "out/onchain");
 const PK = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80" as const; // anvil #0
 const IMAGE_BASE = "https://covers.test/";
-const PRICE = 5_000_000_000_000_000n;
+const PRICE = 7_000_000_000_000_000n; // the public price Deploy.s.sol defaults to
 const seeds = ["one", "seven", "aperture"].map((s) => keccak256(toHex(s)));
 
 const sh = (cmd: string, args: string[], env: Record<string, string> = {}) =>
@@ -51,7 +51,7 @@ try {
   // the deployer is owner and, by default, the approver
   const account = privateKeyToAccount(PK);
   const chainId = await client.getChainId();
-  sh("cast", ["send", proxy, "setMintState(uint8)", "1", "--rpc-url", rpc, "--private-key", PK]);
+  sh("cast", ["send", proxy, "setMintState(uint8)", "2", "--rpc-url", rpc, "--private-key", PK]); // PUBLIC
   for (const seed of seeds) {
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
     const signature = await account.signTypedData({
@@ -60,7 +60,7 @@ try {
       primaryType: "Mint",
       message: { minter: account.address, seed, deadline },
     });
-    sh("cast", ["send", proxy, "mint(bytes32,uint256,bytes)", seed, String(deadline), signature, "--value", String(PRICE), "--rpc-url", rpc, "--private-key", PK]);
+    sh("cast", ["send", proxy, "mint(bytes32,uint256,bytes,bytes32[])", seed, String(deadline), signature, "[]", "--value", String(PRICE), "--rpc-url", rpc, "--private-key", PK]);
   }
 
   const abi = parseAbi(["function tokenURI(uint256) view returns (string)", "function seedOf(uint256) view returns (bytes32)"]);

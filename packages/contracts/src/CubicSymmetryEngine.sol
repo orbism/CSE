@@ -8,6 +8,7 @@ import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/U
 import {EIP712Upgradeable} from "@openzeppelin/contracts-upgradeable/utils/cryptography/EIP712Upgradeable.sol";
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
+import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 
 interface ICSERenderer {
@@ -51,12 +52,17 @@ contract CubicSymmetryEngine is
     uint256 public constant MAX_SUPPLY = 512;
     /// @notice Held back for the artist; minted by the owner, not the public sale.
     uint256 public constant RESERVE = 11;
-    uint256 public constant MAX_PER_WALLET = 20;
+    uint256 public constant MAX_PER_WALLET = 16;
     bytes32 public constant MINT_TYPEHASH = keccak256("Mint(address minter,bytes32 seed,uint256 deadline)");
 
+    /**
+     * @dev CLOSED -> ALLOWLIST -> PUBLIC are owner flips (`setMintState`);
+     *      SOLD_OUT is taken automatically by the mint that fills the supply.
+     */
     enum MintState {
         CLOSED,
-        LIVE,
+        ALLOWLIST,
+        PUBLIC,
         SOLD_OUT
     }
 
@@ -85,14 +91,21 @@ contract CubicSymmetryEngine is
      */
     address public renderer;
 
+    /// @notice Price during ALLOWLIST; `price` is the public price.
+    uint256 public allowlistPrice;
+    /// @notice Merkle root of the allowlist: leaves are keccak256(bytes.concat(keccak256(abi.encode(address)))).
+    bytes32 public allowlistRoot;
+
     /// @dev Reserved so future upgrades can add storage without collisions.
-    uint256[40] private __gap;
+    uint256[38] private __gap;
 
     // ------------------------------------------------------------------ events
 
     event Minted(uint256 indexed tokenId, bytes32 indexed seed, address indexed to);
     event MintStateChanged(MintState previous, MintState current);
     event PriceChanged(uint256 previous, uint256 current);
+    event AllowlistPriceChanged(uint256 previous, uint256 current);
+    event AllowlistRootChanged(bytes32 root);
     event SignerChanged(address signer);
     event BaseURIChanged(string baseURI);
     event Withdrawn(address indexed to, uint256 amount);
@@ -114,6 +127,7 @@ contract CubicSymmetryEngine is
     error ApprovalExpired();
     error BadSignature();
     error MetadataAlreadyFrozen();
+    error NotAllowlisted();
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {
@@ -123,6 +137,7 @@ contract CubicSymmetryEngine is
     function initialize(
         address owner_,
         uint256 price_,
+        uint256 allowlistPrice_,
         string memory baseURI_,
         address royaltyReceiver_,
         uint96 royaltyFeeNumerator_,
@@ -138,6 +153,7 @@ contract CubicSymmetryEngine is
         __EIP712_init("Cubic Symmetry Engine", "1");
 
         price = price_;
+        allowlistPrice = allowlistPrice_;
         _baseTokenURI = baseURI_;
         signer = signer_;
         _setDefaultRoyalty(royaltyReceiver_, royaltyFeeNumerator_);
@@ -148,14 +164,27 @@ contract CubicSymmetryEngine is
     /**
      * @notice Mint the Form rolled from `seed`, with the approver's signature
      *         over (msg.sender, seed, deadline). One token per call.
+     * @param proof Merkle proof of msg.sender against `allowlistRoot`; only
+     *        read during ALLOWLIST, pass empty otherwise.
      */
-    function mint(bytes32 seed, uint256 deadline, bytes calldata signature) external payable {
-        if (mintState != MintState.LIVE) revert MintNotLive();
+    function mint(bytes32 seed, uint256 deadline, bytes calldata signature, bytes32[] calldata proof)
+        external
+        payable
+    {
+        uint256 due;
+        if (mintState == MintState.PUBLIC) {
+            due = price;
+        } else if (mintState == MintState.ALLOWLIST) {
+            if (!MerkleProof.verifyCalldata(proof, allowlistRoot, _leaf(msg.sender))) revert NotAllowlisted();
+            due = allowlistPrice;
+        } else {
+            revert MintNotLive();
+        }
         if (block.timestamp > deadline) revert ApprovalExpired();
         // the reserve is carved out of the cap so the owner can always claim it
         if (totalMinted + 1 > MAX_SUPPLY - (RESERVE - reserveMinted)) revert SupplyExhausted();
         if (mintedBy[msg.sender] + 1 > MAX_PER_WALLET) revert WalletLimitExceeded();
-        if (msg.value != price) revert IncorrectPayment();
+        if (msg.value != due) revert IncorrectPayment();
 
         bytes32 digest = _hashTypedDataV4(keccak256(abi.encode(MINT_TYPEHASH, msg.sender, seed, deadline)));
         (address recovered, ECDSA.RecoverError err,) = ECDSA.tryRecover(digest, signature);
@@ -202,10 +231,21 @@ contract CubicSymmetryEngine is
         mintState = next;
     }
 
-    /// @dev Adjustable without an upgrade; the mint is a single public phase.
+    /// @notice The public price. Adjustable without an upgrade.
     function setPrice(uint256 next) external onlyOwner {
         emit PriceChanged(price, next);
         price = next;
+    }
+
+    function setAllowlistPrice(uint256 next) external onlyOwner {
+        emit AllowlistPriceChanged(allowlistPrice, next);
+        allowlistPrice = next;
+    }
+
+    /// @notice Commit the raffle result. Replaceable until the owner stops replacing it.
+    function setAllowlistRoot(bytes32 root) external onlyOwner {
+        allowlistRoot = root;
+        emit AllowlistRootChanged(root);
     }
 
     /// @notice Rotate the approver. Signatures from the old key stop working at once.
@@ -253,6 +293,21 @@ contract CubicSymmetryEngine is
     }
 
     // -------------------------------------------------------------- views
+
+    /// @notice What a mint costs right now: the allowlist price during ALLOWLIST, else the public price.
+    function currentPrice() external view returns (uint256) {
+        return mintState == MintState.ALLOWLIST ? allowlistPrice : price;
+    }
+
+    /// @notice Whether `proof` puts `account` on the allowlist, for a site to check before sending.
+    function isAllowlisted(address account, bytes32[] calldata proof) external view returns (bool) {
+        return MerkleProof.verifyCalldata(proof, allowlistRoot, _leaf(account));
+    }
+
+    /// @dev OpenZeppelin's StandardMerkleTree leaf for a single address: double-hashed against second-preimage tricks.
+    function _leaf(address account) private pure returns (bytes32) {
+        return keccak256(bytes.concat(keccak256(abi.encode(account))));
+    }
 
     function baseURI() external view returns (string memory) {
         return _baseTokenURI;

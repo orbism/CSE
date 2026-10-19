@@ -36,6 +36,10 @@ const REVERTS: Record<string, FriendlyError> = {
     detail: `Ids run from 1 to ${COLLECTION.supply}.`,
   },
   InvalidQuantity: { title: "Nothing selected to mint" },
+  NotAllowlisted: {
+    title: "This wallet is not on the allowlist",
+    detail: "The public mint opens after the allowlist window.",
+  },
   OwnableUnauthorizedAccount: {
     title: "That action is owner-only",
     detail: "This wallet cannot perform it.",

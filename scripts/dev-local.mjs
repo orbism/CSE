@@ -7,7 +7,7 @@
  * anyone keeping their own file. Ctrl-C tears everything down.
  *
  *   node scripts/dev-local.mjs            # assumes a collection already exists
- *   node scripts/dev-local.mjs --live     # also flip the mint to LIVE
+ *   node scripts/dev-local.mjs --live     # also flip the mint to PUBLIC
  */
 
 import { spawn } from "node:child_process";
@@ -242,8 +242,10 @@ const deployOut = await run(
       ...process.env,
       PRIVATE_KEY: DEPLOYER_PK,
       CSE_OWNER: DEPLOYER,
-      CSE_PRICE_WEI: "5000000000000000",
+      CSE_PRICE_WEI: "7000000000000000",
+      CSE_ALLOWLIST_PRICE_WEI: "5000000000000000",
       CSE_SIGNER: DEPLOYER,
+      CSE_REVEALER: DEPLOYER,
       CSE_ONCHAIN_DIR: ONCHAIN,
       CSE_IMAGE_BASE: coversBase,
     },
@@ -271,7 +273,7 @@ async function setMintState(state) {
 // minter (by the deployer, who is the approver locally), then `mint`.
 const DEMO_MINTS = Number(process.env.CSE_DEV_TOKENS ?? 12);
 if (DEMO_MINTS > 0) {
-  await setMintState(1);
+  await setMintState(2);
   const chainId = 31337;
   const typed = (minter, seed, deadline) =>
     JSON.stringify({
@@ -300,7 +302,7 @@ if (DEMO_MINTS > 0) {
     ).trim();
     await run(
       "cast",
-      ["send", proxy, "mint(bytes32,uint256,bytes)", seed, String(deadline), sig, "--value", "5000000000000000",
+      ["send", proxy, "mint(bytes32,uint256,bytes,bytes32[])", seed, String(deadline), sig, "[]", "--value", "7000000000000000",
         "--private-key", DEPLOYER_PK, "--rpc-url", RPC],
       { cwd: CONTRACTS },
     );
@@ -315,8 +317,8 @@ if (DEMO_MINTS > 0) {
     { cwd: ROOT },
   );
 }
-await setMintState(WANT_LIVE ? 1 : 0);
-console.log(`mint state -> ${WANT_LIVE ? "LIVE" : "CLOSED"}`);
+await setMintState(WANT_LIVE ? 2 : 0);
+console.log(`mint state -> ${WANT_LIVE ? "PUBLIC" : "CLOSED"}`);
 
 let envBlock = "";
 
@@ -367,7 +369,7 @@ ${RULE}
   assets    http://127.0.0.1:${ASSET_PORT}
   rpc       ${RPC}
   contract  ${proxy}
-  state     ${WANT_LIVE ? "LIVE" : "CLOSED (demo box)"}
+  state     ${WANT_LIVE ? "PUBLIC" : "CLOSED (demo box)"}
 
   deployer  ${DEPLOYER}
 

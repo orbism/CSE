@@ -1,0 +1,44 @@
+// The site's own records. The chain holds the mint; this holds what the chain
+// cannot: raffle entries, and the perceptual fingerprints the approver checks
+// new rolls against. DATABASE_URL lives in prisma.config.ts.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// One row per wallet that entered the allowlist raffle. `won` and `proof`
+/// are written by `pnpm draw`; the proof is what the wallet sends with `mint`.
+model AllowlistEntry {
+  address   String   @id
+  createdAt DateTime @default(now())
+  won       Boolean  @default(false)
+  proof     String[] @default([])
+}
+
+/// The mint watcher's render of each token: the perceptual hash the approver
+/// compares candidate rolls against, plus the structural vector so the
+/// approver can skip re-deriving it.
+model Fingerprint {
+  tokenId   Int      @id
+  seed      String   @unique
+  structure String
+  vector    Float[]
+  hash      String
+  createdAt DateTime @default(now())
+}
+
+/// The raffle result, once. Its presence closes entries.
+model Draw {
+  id          Int      @id @default(1)
+  blockNumber BigInt
+  blockHash   String
+  root        String
+  winners     Int
+  entries     Int
+  drawnAt     DateTime @default(now())
+}

@@ -374,8 +374,11 @@ if (!signer) {
 step("Parameters");
 
 const owner = (await ask("  Contract owner", process.env.CSE_OWNER ?? deployer)) || deployer;
-const priceEth = await ask("  Mint price in ETH", process.env.CSE_PRICE_ETH ?? "0.005");
+const priceEth = await ask("  Public price in ETH", process.env.CSE_PRICE_ETH ?? "0.007");
 const priceWei = (await run("cast", ["to-wei", priceEth, "ether"])).trim();
+const allowlistEth = await ask("  Allowlist price in ETH", process.env.CSE_ALLOWLIST_PRICE_ETH ?? "0.005");
+const allowlistWei = (await run("cast", ["to-wei", allowlistEth, "ether"])).trim();
+const revealer = (await ask("  Revealer (the mint watcher's address, blank for none)", process.env.CSE_REVEALER ?? "")) || "";
 const royaltyReceiver = (await ask("  Royalty receiver", process.env.CSE_ROYALTY ?? owner)) || owner;
 const royaltyBps = await ask("  Royalty basis points", process.env.CSE_ROYALTY_BPS ?? "500");
 
@@ -383,11 +386,12 @@ console.log(`
   ${C.dim("network ")} ${net.label} (${net.chainId})
   ${C.dim("deployer")} ${deployer}
   ${C.dim("owner   ")} ${owner}
-  ${C.dim("price   ")} ${priceEth} ETH ${C.dim(`(${priceWei} wei)`)}
+  ${C.dim("price   ")} ${priceEth} ETH public, ${allowlistEth} ETH allowlist
   ${C.dim("royalty ")} ${royaltyBps} bps -> ${royaltyReceiver}
   ${C.dim("baseURI ")} ${baseURI}
-  ${C.dim("supply  ")} 512 (11 reserved, 20 per wallet)
+  ${C.dim("supply  ")} 512 (11 reserved, 16 per wallet)
   ${C.dim("signer  ")} ${signer}
+  ${C.dim("revealer")} ${revealer || C.dim("none")}
   ${C.dim("verify  ")} ${etherscanKey ? "yes" : C.yellow("no (no Etherscan key)")}
 `);
 
@@ -407,10 +411,12 @@ const deployEnv = {
   PRIVATE_KEY: pk,
   CSE_OWNER: owner,
   CSE_PRICE_WEI: priceWei,
+  CSE_ALLOWLIST_PRICE_WEI: allowlistWei,
   CSE_BASE_URI: baseURI,
   CSE_ROYALTY: royaltyReceiver,
   CSE_ROYALTY_BPS: royaltyBps,
   CSE_SIGNER: signer,
+  ...(revealer ? { CSE_REVEALER: revealer } : {}),
   ...(onchain ? { CSE_ONCHAIN_DIR: ONCHAIN, CSE_IMAGE_BASE: imageBase } : {}),
 };
 
@@ -456,12 +462,14 @@ if (etherscanKey) {
     const initCalldata = (
       await run("cast", [
         "calldata",
-        "initialize(address,uint256,string,address,uint96)",
+        "initialize(address,uint256,uint256,string,address,uint96,address)",
         owner,
         priceWei,
+        allowlistWei,
         baseURI,
         royaltyReceiver,
         royaltyBps,
+        signer,
       ])
     ).trim();
     const proxyArgs = (
@@ -561,8 +569,11 @@ const record = {
   deployer,
   priceWei,
   priceEth,
+  allowlistWei,
+  allowlistEth,
   baseURI,
   signer,
+  revealer: revealer || null,
   renderer,
   imageBase: renderer ? imageBase : null,
   onchain: onchain ? { sha256: onchain.sha256, artBundleSha256: onchain.artBundleSha256 } : null,

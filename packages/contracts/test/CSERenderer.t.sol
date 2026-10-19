@@ -27,7 +27,7 @@ contract CSERendererTest is Test {
     function setUp() public {
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
         bytes memory init = abi.encodeCall(
-            CubicSymmetryEngine.initialize, (owner, PRICE, "ipfs://x/", owner, 500, vm.addr(signerPk))
+            CubicSymmetryEngine.initialize, (owner, PRICE, PRICE, "ipfs://x/", owner, 500, vm.addr(signerPk))
         );
         cse = CubicSymmetryEngine(address(new ERC1967Proxy(address(impl), init)));
 
@@ -50,7 +50,7 @@ contract CSERendererTest is Test {
         vm.prank(owner);
         cse.setRenderer(address(renderer));
         vm.prank(owner);
-        cse.setMintState(CubicSymmetryEngine.MintState.LIVE);
+        cse.setMintState(CubicSymmetryEngine.MintState.PUBLIC);
         vm.deal(alice, 100 ether);
     }
 
@@ -64,13 +64,13 @@ contract CSERendererTest is Test {
         uint256 deadline = block.timestamp + 600;
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerPk, cse.mintDigest(who, seed, deadline));
         vm.prank(who);
-        cse.mint{value: PRICE}(seed, deadline, abi.encodePacked(r, s, v));
+        cse.mint{value: PRICE}(seed, deadline, abi.encodePacked(r, s, v), new bytes32[](0));
     }
 
     /// Public-mint up to id `n`, continuing from wherever the supply is, across a rotation of wallets.
     function _mintMany(uint256 n) internal {
         for (uint256 i = cse.totalMinted() + 1; i <= n; ++i) {
-            address who = address(uint160(0x1000 + i / 20));
+            address who = address(uint160(0x1000 + i / 16));
             vm.deal(who, 1 ether);
             _mintAs(who, _seed(i));
         }
@@ -180,6 +180,26 @@ contract CSERendererTest is Test {
 
     // ---- the reveal
 
+    function test_revealerCanRevealOwnerSetsIt() public {
+        address watcher = address(0x3A7C);
+        _sellOut();
+        address table = SSTORE2.write(_traitTable());
+        vm.prank(watcher);
+        vm.expectRevert(CSERenderer.NotRevealer.selector);
+        renderer.reveal(table);
+
+        vm.prank(watcher);
+        vm.expectRevert();
+        renderer.setRevealer(watcher);
+        vm.prank(owner);
+        renderer.setRevealer(watcher);
+        assertEq(renderer.revealer(), watcher);
+
+        vm.prank(watcher);
+        renderer.reveal(table);
+        assertTrue(renderer.revealed());
+    }
+
     function test_revealOnlyAfterSellOutAndOnce() public {
         _mintMany(3);
         address table = SSTORE2.write(_traitTable());
@@ -276,7 +296,7 @@ contract CSERendererRealPageTest is Test {
         uint256 signerPk = 0x5167;
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
         bytes memory init = abi.encodeCall(
-            CubicSymmetryEngine.initialize, (address(this), 0, "ipfs://x/", address(this), 500, vm.addr(signerPk))
+            CubicSymmetryEngine.initialize, (address(this), 0, 0, "ipfs://x/", address(this), 500, vm.addr(signerPk))
         );
         CubicSymmetryEngine cse = CubicSymmetryEngine(address(new ERC1967Proxy(address(impl), init)));
         bytes memory page = bytes(vm.readFile(string.concat(dir, "/page-tail.b64")));
@@ -290,11 +310,11 @@ contract CSERendererRealPageTest is Test {
             parts[i] = SSTORE2.write(slice);
         }
         CSERenderer r = new CSERenderer(address(cse), parts, "https://covers.test/");
-        cse.setMintState(CubicSymmetryEngine.MintState.LIVE);
+        cse.setMintState(CubicSymmetryEngine.MintState.PUBLIC);
         bytes32 seed = keccak256("gas");
         uint256 deadline = block.timestamp + 600;
         (uint8 v, bytes32 rr, bytes32 ss) = vm.sign(signerPk, cse.mintDigest(address(this), seed, deadline));
-        cse.mint{value: 0}(seed, deadline, abi.encodePacked(rr, ss, v));
+        cse.mint{value: 0}(seed, deadline, abi.encodePacked(rr, ss, v), new bytes32[](0));
         uint256 g0 = gasleft();
         string memory uri = r.tokenURI(1);
         uint256 used = g0 - gasleft();

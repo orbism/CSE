@@ -19,11 +19,16 @@ export const CSE_ABI = parseAbi([
   "error ApprovalExpired()",
   "error BadSignature()",
   "error MetadataAlreadyFrozen()",
+  "error NotAllowlisted()",
   "event Minted(uint256 indexed tokenId, bytes32 indexed seed, address indexed to)",
   "event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)",
-  "function mint(bytes32 seed, uint256 deadline, bytes signature) payable",
+  "function mint(bytes32 seed, uint256 deadline, bytes signature, bytes32[] proof) payable",
   "function mintState() view returns (uint8)",
   "function price() view returns (uint256)",
+  "function allowlistPrice() view returns (uint256)",
+  "function currentPrice() view returns (uint256)",
+  "function allowlistRoot() view returns (bytes32)",
+  "function isAllowlisted(address account, bytes32[] proof) view returns (bool)",
   "function totalSupply() view returns (uint256)",
   "function totalMinted() view returns (uint256)",
   "function remainingPublic() view returns (uint256)",
@@ -38,7 +43,8 @@ export const CSE_ABI = parseAbi([
   "function mintDigest(address minter, bytes32 seed, uint256 deadline) view returns (bytes32)",
 ]);
 
-export const MINT_STATE = ["CLOSED", "LIVE", "SOLD_OUT"] as const;
+/** Index = the contract's MintState. SOLD_OUT is taken by the mint that fills the supply. */
+export const MINT_STATE = ["CLOSED", "ALLOWLIST", "PUBLIC", "SOLD_OUT"] as const;
 export type MintState = (typeof MINT_STATE)[number];
 
 /** EIP-712 shape of a mint approval; must match the contract's MINT_TYPEHASH and domain. */

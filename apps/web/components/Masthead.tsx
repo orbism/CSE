@@ -14,6 +14,7 @@ const NAV = [
   { href: "/", words: ["the lab"], hint: "build your own form, not mintable" },
   { href: "/input", words: ["mint", "input", "solve", "roll"], hint: "the collection and the mint" },
   { href: "/output", words: ["gallery", "output", "solves", "the art"], hint: "every Form, filterable" },
+  { href: "/allowlist", words: ["allowlist"], hint: "enter the raffle for the allowlist window" },
   { href: "/art", words: ["about:art"], hint: "why this looks the way it does" },
   { href: "/math", words: ["about:math"], hint: "how a cubic becomes a shape" },
 ];

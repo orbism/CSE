@@ -12,6 +12,6 @@ export const COLLECTION = {
   symbol: "CSE",
   supply: 512,
   reserve: 11,
-  maxPerWallet: 20,
+  maxPerWallet: 16,
   priceEth: "0.005",
 } as const;

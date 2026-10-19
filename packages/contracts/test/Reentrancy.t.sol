@@ -25,13 +25,13 @@ contract Reenterer is IERC721Receiver {
 
     function go(bytes32 s1, uint256 d1, bytes calldata g1, bytes32 s2, uint256 d2, bytes calldata g2) external {
         (seed2, deadline2, sig2, armed) = (s2, d2, g2, true);
-        engine.mint{value: engine.price()}(s1, d1, g1);
+        engine.mint{value: engine.price()}(s1, d1, g1, new bytes32[](0));
     }
 
     function onERC721Received(address, address, uint256, bytes calldata) external returns (bytes4) {
         if (armed) {
             armed = false;
-            engine.mint{value: engine.price()}(seed2, deadline2, sig2);
+            engine.mint{value: engine.price()}(seed2, deadline2, sig2, new bytes32[](0));
         }
         return IERC721Receiver.onERC721Received.selector;
     }
@@ -48,11 +48,11 @@ contract ReentrancyTest is Test {
     function setUp() public {
         CubicSymmetryEngine impl = new CubicSymmetryEngine();
         bytes memory init = abi.encodeCall(
-            CubicSymmetryEngine.initialize, (owner, PRICE, "ipfs://x/", owner, 500, vm.addr(signerPk))
+            CubicSymmetryEngine.initialize, (owner, PRICE, PRICE, "ipfs://x/", owner, 500, vm.addr(signerPk))
         );
         engine = CubicSymmetryEngine(address(new ERC1967Proxy(address(impl), init)));
         vm.prank(owner);
-        engine.setMintState(CubicSymmetryEngine.MintState.LIVE);
+        engine.setMintState(CubicSymmetryEngine.MintState.PUBLIC);
     }
 
     function _approve(address minter, bytes32 seed) internal view returns (uint256 deadline, bytes memory sig) {
@@ -68,11 +68,11 @@ contract ReentrancyTest is Test {
         for (uint256 w = 0; n < cap - 1; w++) {
             address buyer = address(uint160(0x1000 + w));
             vm.deal(buyer, 1 ether);
-            for (uint256 i = 0; i < 20 && n < cap - 1; i++) {
+            for (uint256 i = 0; i < 16 && n < cap - 1; i++) {
                 bytes32 seed = keccak256(abi.encode(n));
                 (uint256 d, bytes memory s) = _approve(buyer, seed);
                 vm.prank(buyer);
-                engine.mint{value: PRICE}(seed, d, s);
+                engine.mint{value: PRICE}(seed, d, s, new bytes32[](0));
                 n++;
             }
         }

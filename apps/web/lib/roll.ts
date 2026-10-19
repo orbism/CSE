@@ -30,6 +30,8 @@ export function rollClear(priors: Prior[], tries = 64): { seed: `0x${string}`; t
 export interface Approval {
   deadline: bigint;
   signature: `0x${string}`;
+  /** Merkle proof for the allowlist phase; empty in public. */
+  proof: `0x${string}`[];
 }
 
 /**
@@ -50,6 +52,6 @@ export async function approve(
   if (res.status === 409) return null;
   if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error ?? `approver ${res.status}`);
   if (dryRun) return true;
-  const body = (await res.json()) as { deadline: string; signature: `0x${string}` };
-  return { deadline: BigInt(body.deadline), signature: body.signature };
+  const body = (await res.json()) as { deadline: string; signature: `0x${string}`; proof?: `0x${string}`[] };
+  return { deadline: BigInt(body.deadline), signature: body.signature, proof: body.proof ?? [] };
 }

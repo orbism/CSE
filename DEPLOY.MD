@@ -180,12 +180,12 @@ Answers to have ready:
 | Prompt          | Value                                   |
 | --------------- | --------------------------------------- |
 | Contract owner  | your multisig / cold wallet (default: deployer) |
-| Mint price      | `0.005`                                 |
+| Public price    | `0.007`                                 |
+| Allowlist price | `0.005`                                 |
+| Revealer        | the mint watcher's address              |
 | Royalty receiver| payout address                          |
 | Royalty bps     | `500` (5%)                              |
 
-⚠ **permanent** — the provenance hash and master seed are committed at
-initialisation and have no setter.
 
 If Etherscan shows no read/write tabs on the proxy, mark it as a proxy at
 `https://sepolia.etherscan.io/proxyContractChecker?a=<proxy>`.
@@ -229,14 +229,16 @@ While the mint runs, keep the watcher up on a machine you control (it renders
 in a real browser):
 
 ```sh
-BLOB_READ_WRITE_TOKEN=… pnpm --filter @cse/generator watch-mints --contract <proxy> --rpc <rpc>
+BLOB_READ_WRITE_TOKEN=… WATCHER_SECRET=… REVEALER_PRIVATE_KEY=… \
+  pnpm --filter @cse/generator watch-mints --contract <proxy> --rpc <rpc> --site https://<the site>
 ```
 
-It uploads `covers/<id>.png|svg` and `covers/index.json` to the Blob store;
-`NEXT_PUBLIC_COVERS_BASE` is that store's `covers/` URL, and the renderer's
-`imageBase` the same (`SetImageBase`).
+It uploads `covers/<id>.png|svg` and `covers/index.json` to the Blob store
+(`NEXT_PUBLIC_COVERS_BASE` is that store's `covers/` URL, and the renderer's
+`imageBase` the same), files each fingerprint with the site's database, and at
+512 minted ranks the set and sends the reveal as the renderer's `revealer`.
 
-At sell-out:
+The reveal by hand, should the watcher be down at the moment of sell-out:
 
 ```sh
 pnpm --filter @cse/generator reveal --contract <proxy> --rpc <rpc>      # out/onchain/traits.bin
@@ -321,8 +323,14 @@ All run from `packages/contracts`, with `CSE_PROXY=<proxy>` and
 `PRIVATE_KEY=<owner key>` set:
 
 ```sh
-# open the mint (0 = closed, 1 = live)
+# phases: 0 = CLOSED, 1 = ALLOWLIST, 2 = PUBLIC. SOLD_OUT flips itself at 512.
 CSE_MINT_STATE=1 forge script script/Admin.s.sol:SetMintState --rpc-url <rpc> --broadcast
+
+# the allowlist root, from `pnpm --filter @cse/web draw` (below)
+CSE_ALLOWLIST_ROOT=0x… forge script script/Admin.s.sol:SetAllowlistRoot --rpc-url <rpc> --broadcast
+
+# who besides the owner may trigger the reveal (the mint watcher)
+CSE_RENDERER=0x… CSE_REVEALER=0x… forge script script/Admin.s.sol:SetRevealer --rpc-url <rpc> --broadcast
 
 # repoint metadata
 CSE_BASE_URI=ipfs://<cid>/ forge script script/Admin.s.sol:SetBaseURI --rpc-url <rpc> --broadcast
@@ -334,9 +342,32 @@ CSE_RESERVE_TO=0x… CSE_RESERVE_FROM=502 CSE_RESERVE_QTY=11 \
 # withdraw proceeds
 CSE_WITHDRAW_TO=0x… forge script script/Admin.s.sol:Withdraw --rpc-url <rpc> --broadcast
 
-# change price
+# change prices
 CSE_PRICE_WEI=… forge script script/Admin.s.sol:SetPrice --rpc-url <rpc> --broadcast
+CSE_ALLOWLIST_PRICE_WEI=… forge script script/Admin.s.sol:SetAllowlistPrice --rpc-url <rpc> --broadcast
 ```
+
+### The allowlist, start to finish
+
+1. The site collects entries at `/allowlist`: a connected wallet, one entry
+   each, into the `AllowlistEntry` table (`DATABASE_URL`; apply the schema once
+   with `pnpm --filter @cse/web db:migrate`).
+2. Pick a block that will be mined after entries close and announce it. Once it
+   exists, draw:
+
+   ```sh
+   pnpm --filter @cse/web draw --block <n> --rpc <rpc>            # dry run: prints the root
+   pnpm --filter @cse/web draw --block <n> --rpc <rpc> --apply    # writes winners + proofs, closes entries
+   ```
+
+   Entries are ordered by `keccak256(blockHash ‖ address)` and the first 420
+   win; `out/allowlist/draw-<root>.json` is the list to publish. Anyone can
+   rerun the script against it and get the same root.
+3. `SetAllowlistRoot`, then `SetMintState` 1. Winners mint at the allowlist
+   price with the proof the approver attaches; everyone else is told to wait.
+4. Two hours later, `SetMintState` 2. Public price, no proof, same 16-per-wallet cap.
+5. The mint that lands #512 flips SOLD_OUT. The watcher sees it, ranks the set
+   and sends the reveal as the revealer.
 
 ⚠ **permanent** — `FreezeMetadata` disables `SetBaseURI` forever. Only run it
 once the pin is confirmed good and you never intend to move the metadata.
@@ -348,13 +379,18 @@ once the pin is confirmed good and you never intend to move the metadata.
 
 ## Facts worth keeping straight
 
-- Supply 512, 11 reserved (#502–#512), 20 per wallet, buyers choose their id
-- Provenance hash + master seed: set at init, no setter, ⚠ permanent
-- Base URI: settable until `FreezeMetadata`
-- Owner-only: mint state, base URI, price, reserve, withdraw, upgrade
-- 41 forge tests cover all of the above — `pnpm test` before every deploy
+- Supply 512, 11 reserved, 16 per wallet across both phases, sequential ids,
+  the seed stored with each token
+- Phases CLOSED → ALLOWLIST (Merkle root, 0.005) → PUBLIC (0.007) by owner
+  flip; SOLD_OUT by itself at 512
+- Royalties: ERC-2981, 5% to the receiver given at deploy; owner can change it
+- Base URI and renderer: settable until `FreezeMetadata`; the renderer's cover
+  URL until `LockRenderer`
+- Owner-only: mint state, prices, allowlist root, signer, renderer, reserve,
+  withdraw, upgrade. Reveal: owner or revealer
+- 54 forge tests cover all of the above — `pnpm test` before every deploy
 - Any edit to `core/traits.ts`, `core/token.ts` or the `art/` renderer changes
-  every token and therefore the provenance hash: go back to step 1
+  what a seed renders as: rebuild and redeploy the renderer before anything mints
 - Calibration probes, derivation-only and safe to run any time:
   `pnpm --filter @cse/generator analyse` (trait band distributions) and
   `distances` (uniqueness-gate margins)

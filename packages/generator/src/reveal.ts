@@ -10,13 +10,11 @@
  */
 
 import "./env.js";
-import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { http, createPublicClient, parseAbi } from "viem";
-import { COLLECTION, tokenFromSeed } from "@cse/core";
-import { rank } from "./metadata.js";
-import { packTraits } from "./traits-pack.js";
+import { COLLECTION } from "@cse/core";
+import { revealTable } from "./reveal-table.js";
 
 const arg = (name: string) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -42,17 +40,10 @@ const seeds = await Promise.all(
     client.readContract({ address: contract, abi, functionName: "seedOf", args: [BigInt(i + 1)] }),
   ),
 );
-const tokens = seeds.map((seed, i) => tokenFromSeed(seed, i + 1));
-const ranked = rank(tokens);
-const traits = packTraits(ranked.map((r) => ({ token: r.token, rarityRank: r.rank })));
+const { traits, sha256 } = revealTable(seeds);
 
 await mkdir(OUT, { recursive: true });
 await writeFile(join(OUT, "traits.bin"), traits);
-const info = {
-  contract,
-  tokens: total,
-  sha256: createHash("sha256").update(traits).digest("hex"),
-  revealedAt: new Date().toISOString(),
-};
+const info = { contract, tokens: total, sha256, revealedAt: new Date().toISOString() };
 await writeFile(join(OUT, "reveal.json"), JSON.stringify(info, null, 2));
 console.log(`${total} tokens ranked; traits.bin sha256 ${info.sha256}\nwrote ${OUT}`);
