@@ -3314,3 +3314,32 @@ body {
   font-family: var(--display);
   letter-spacing: 0.04em;
 }
+
+/* ── moodboard ──────────────────────────────────────────────────────────── */
+
+.mood-section {
+  margin-top: 28px;
+}
+
+.mood-note {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--ink-dim);
+}
+
+.mood-grid {
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+}
+
+/* Holds a tile's square while it waits for an engine slot or sits off screen. */
+.mood-hold {
+  aspect-ratio: 1;
+  background: #000;
+}
+
+.mood-seed {
+  margin-top: 14px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
